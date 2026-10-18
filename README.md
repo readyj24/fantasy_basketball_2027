@@ -57,9 +57,12 @@ Name fixes: add `data/name_overrides.csv` with columns `source_name,projection_n
 
 - **Counting cats**: z = (x − pool mean) / pool sd. **FG%/FT%**: z of `FGA × (FG% − pool FG%)`.
   **A/T**: z of `AST − r × TO`, r = pool AST/TO. Each z × `min(1, games/75)^0.5`.
-- **Pool** = top NumTeams × 14 players (iterated twice). **Replacement level** = mean of the
-  `replacement_window` players just outside the pool (config; spec value 1 = only the 197th
-  player, default 10 because one player's quirks otherwise skew a whole category).
+- **Pool** = top NumTeams × 14 players (iterated twice). **Replacement level**: for each of
+  G/F/C, the mean z of the first 5 players eligible there ranked from pool − 16 down
+  (#180 at 14 teams, #152 at 12, #166 at 13); `blended` mode subtracts the average of the
+  three lines from everyone, `positional` measures each player against his easiest
+  eligible line. Deliberately a bit above true waiver level, since the room drafts off
+  different rankings. All three knobs are in `config.yaml`.
 - **opp_rank** = w × ADP + (1 − w) × Yahoo rank. **AdjADP** = max(opp_rank + Drift, CurrentPick).
 - **PAvail** = 1 − NORM.DIST(TargetPick, AdjADP, max(SigmaMin, SigmaMult × opp_rank)).
 - **Score** = Value − PAvail × max(0, Value − NextValue), NextValue = the (TargetPick − CurrentPick + 1)-th

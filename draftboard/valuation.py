@@ -1,7 +1,8 @@
 """Per-category z-score valuation (H2H 9-cat with A/T instead of TO).
 
 All category values are per game. For each team count the pool is the top
-NumTeams x rounds players; replacement level is the player(s) just outside it.
+NumTeams x rounds players; replacement level comes from a few players per position
+ranked just below the bottom of the pool (see replacement_line).
 """
 from __future__ import annotations
 
@@ -50,28 +51,63 @@ def zscores(df: pd.DataFrame, pool: pd.Series, avail: pd.Series) -> pd.DataFrame
     return ((imp - mu) / sd).mul(avail, axis=0)
 
 
-def value_players(df: pd.DataFrame, pool_size: int, vcfg: dict) -> pd.DataFrame:
-    """Return per-category surplus z's (replacement level subtracted) and pool flag."""
-    df = df.reset_index(drop=True)
+POSITIONS = ("G", "F", "C")
+
+
+def position_lines(df: pd.DataFrame, z: pd.DataFrame, order: pd.Index, pool_size: int,
+                   vcfg: dict) -> dict[str, pd.Series]:
+    """Per-position replacement line: mean z of the first `replacement_per_position` players
+    eligible at that position, ranked from pool_size + replacement_start_offset onward."""
+    start = max(0, pool_size + int(vcfg.get("replacement_start_offset", 0)))
+    k = max(1, int(vcfg.get("replacement_per_position", 5)))
+    below = order[start:]
+    lines = {}
+    for p in POSITIONS:
+        elig = [i for i in below if p in str(df.at[i, "yahoo_positions"]).split(",")][:k]
+        if elig:
+            lines[p] = z.loc[elig].mean()
+    return lines
+
+
+def replacement_line(df: pd.DataFrame, z: pd.DataFrame, order: pd.Index, pool_size: int,
+                     vcfg: dict) -> pd.DataFrame:
+    """Row-aligned replacement z's to subtract from every player.
+
+    blended:    one line for everyone = average of the G, F and C lines.
+    positional: each player is measured against the easiest-to-beat line among his
+                eligible positions (lowest replacement total), i.e. classic VORP.
+    """
+    lines = position_lines(df, z, order, pool_size, vcfg)
+    blended = pd.concat(lines.values(), axis=1).mean(axis=1)
+    if vcfg.get("replacement_mode", "blended") != "positional":
+        return pd.DataFrame([blended.values] * len(df), index=df.index, columns=z.columns)
+    rows = []
+    for i in df.index:
+        cands = [lines[p] for p in str(df.at[i, "yahoo_positions"]).split(",") if p in lines]
+        rows.append(min(cands, key=lambda s: s.sum()) if cands else blended)
+    return pd.DataFrame([r.values for r in rows], index=df.index, columns=z.columns)
+
+
+def pooled_zscores(df: pd.DataFrame, pool_size: int, vcfg: dict) -> tuple[pd.DataFrame, pd.Index]:
+    """Availability-adjusted z's against the iterated top-`pool_size` pool, plus rank order."""
     if len(df) <= pool_size:
         raise ValueError(f"need more than {pool_size} projected players, have {len(df)}")
     avail = availability(df["games"], vcfg["full_season_games"], vcfg["availability_exponent"])
-
-    # Seed pool: everyone with a meaningful role, then iterate rank -> re-pool -> recompute.
-    pool = pd.Series(True, index=df.index)
+    pool = pd.Series(True, index=df.index)        # seed: everyone; then rank -> re-pool -> recompute
     z = zscores(df, pool, avail)
     for _ in range(int(vcfg.get("iterations", 2))):
         order = z.sum(axis=1).sort_values(ascending=False).index
         pool = pd.Series(False, index=df.index)
         pool.loc[order[:pool_size]] = True
         z = zscores(df, pool, avail)
+    return z, z.sum(axis=1).sort_values(ascending=False).index
 
-    order = z.sum(axis=1).sort_values(ascending=False).index
-    window = max(1, int(vcfg.get("replacement_window", 1)))
-    repl_idx = order[pool_size:pool_size + window]
-    replacement = z.loc[repl_idx].mean()
-    surplus = z - replacement
 
+def value_players(df: pd.DataFrame, pool_size: int, vcfg: dict) -> pd.DataFrame:
+    """Return per-category surplus z's (replacement level subtracted) and pool flag."""
+    df = df.reset_index(drop=True)
+    z, order = pooled_zscores(df, pool_size, vcfg)
+    surplus = z - replacement_line(df, z, order, pool_size, vcfg)
     in_pool = pd.Series(False, index=df.index)
     in_pool.loc[order[:pool_size]] = True
     surplus["in_pool"] = in_pool

@@ -15,9 +15,14 @@ valuation:
   full_season_games: 75          # availability: min(1, games/75) ^ exponent
   availability_exponent: 0.5
   iterations: 2                  # rank -> re-pick pool -> recompute
-  replacement_window: 10         # average of the N players just outside the pool.
-                                 # 1 = the single 197th player (original spec), but one
-                                 # player's quirks (e.g. an efficient big) skew a whole category
+  # Replacement level: for each of G/F/C, average the first N players eligible at that
+  # position ranked from (pool size + offset) down. Offset -16 = from ~#180 at 14 teams
+  # (#152 at 12, #166 at 13): deliberately a bit above true waiver level, since the room
+  # won't draft by these rankings.
+  replacement_start_offset: -16
+  replacement_per_position: 5
+  replacement_mode: blended      # blended: one line = mean of the G/F/C lines
+                                 # positional: each player vs. his own position's line
   missing_adp: 250
 
 opponents:

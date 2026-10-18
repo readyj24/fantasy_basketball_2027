@@ -2,11 +2,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from draftboard.valuation import (CATS, a_to_impact, availability, pct_impact, raw_impacts,
-                                  value_all, value_players)
+from draftboard.valuation import (CATS, a_to_impact, availability, pct_impact, pooled_zscores,
+                                  position_lines, raw_impacts, value_all, value_players)
 
 VCFG = {"full_season_games": 75, "availability_exponent": 0.5, "iterations": 2,
-        "replacement_window": 1}
+        "replacement_start_offset": -16, "replacement_per_position": 5,
+        "replacement_mode": "blended"}
 
 
 def test_fg_impact_hand_calc():
@@ -50,15 +51,33 @@ def test_availability():
     assert a.tolist() == pytest.approx([1, 1, (50 / 75) ** 0.5, 0])
 
 
-def test_replacement_level_and_pool(synthetic_players):
+def test_replacement_lines_by_position(synthetic_players):
     pool = 168
-    v = value_players(synthetic_players, pool, VCFG)
-    total = v[CATS].sum(axis=1)
-    order = total.sort_values(ascending=False).index
-    # Replacement (169th) player is ~0 in every category; totals rank pool above waivers.
-    assert v.loc[order[pool], CATS].abs().max() == pytest.approx(0, abs=1e-9)
+    df = synthetic_players.reset_index(drop=True)
+    z, order = pooled_zscores(df, pool, VCFG)
+    v = value_players(df, pool, VCFG)
     assert v["in_pool"].sum() == pool
     assert set(order[:pool]) == set(v.index[v["in_pool"]])
+
+    # Hand calc: 5 players eligible at each position, starting from rank pool - 16 (#153).
+    below = order[pool - 16:]
+    lines = {p: z.loc[[i for i in below if p in df.at[i, "yahoo_positions"].split(",")][:5]].mean()
+             for p in "GFC"}
+    blended = (lines["G"] + lines["F"] + lines["C"]) / 3
+    assert (z - v[CATS]).iloc[0].tolist() == pytest.approx(blended.tolist())
+    assert (z - v[CATS]).round(9).drop_duplicates().shape[0] == 1      # same line for everyone
+
+
+def test_positional_mode_uses_easiest_line(synthetic_players):
+    pool = 168
+    df = synthetic_players.reset_index(drop=True)
+    z, order = pooled_zscores(df, pool, VCFG)
+    lines = position_lines(df, z, order, pool, VCFG)
+    p = value_players(df, pool, dict(VCFG, replacement_mode="positional"))
+    for i in df.index[:40]:
+        elig = df.at[i, "yahoo_positions"].split(",")
+        best = min((lines[x] for x in elig), key=lambda s: s.sum())
+        assert (z.loc[i] - p.loc[i, CATS]).tolist() == pytest.approx(best.tolist())
 
 
 def test_team_counts_change_replacement(synthetic_players):
