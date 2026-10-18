@@ -70,8 +70,10 @@ def _hdr(sheet: Sheet, rng: str) -> None:
 
 
 def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
-                   schedule: pd.DataFrame | None = None) -> Workbook:
-    """schedule: optional team x week games grid (columns 'team', 1..N)."""
+                   schedule: pd.DataFrame | None = None,
+                   noise: dict[int, pd.DataFrame] | None = None) -> Workbook:
+    """schedule: optional team x week games grid (columns 'team', 1..N).
+    noise: per team count, category_noise() output for the Punt Advisor."""
     lg, opp, bcfg = cfg["league"], cfg["opponents"], cfg["board"]
     counts = sorted(lg["team_count_options"])
     if counts != list(range(counts[0], counts[0] + len(counts))):
@@ -146,6 +148,27 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
         config.put(wrow, 1 + i, f"={ref}")
     config.put(wrow + 1, 0, "(row form of the weights, used by Players!Value)")
     wb.named["WeightsRow"] = ("Config", f"$B${wrow + 1}:${col_letter(len(CATS))}${wrow + 1}")
+
+    # Weekly category noise (z units) used by the Punt Advisor; one row per team count.
+    nrow = wrow + 3
+    config.put(nrow, 0, "Category noise — weekly σ in z units (higher = edges convert to wins less reliably)")
+    config.fmt(f"A{nrow + 1}", bold=True)
+    config.put_row(nrow + 1, 0, ["Teams"] + [CAT_LABELS[c] for c in CATS])
+    _hdr(config, f"A{nrow + 2}:{col_letter(len(CATS))}{nrow + 2}")
+    for i, nt in enumerate(counts):
+        sig = (noise or {}).get(nt)
+        config.put_row(nrow + 2 + i, 0, [nt] + [round(float(sig.loc[c, "sigma"]), 2) if sig is not None
+                                                else 5.0 for c in CATS])
+    act = nrow + 2 + len(counts)
+    config.put(act, 0, "CatSigma (active)")
+    for k in range(len(CATS)):
+        colL = col_letter(1 + k)
+        config.put(act, 1 + k, f"=INDEX({colL}{nrow + 3}:{colL}{act},NumTeams-{choose_base})")
+    wb.named["CatSigma"] = ("Config", f"$B${act + 1}:${col_letter(len(CATS))}${act + 1}")
+    config.fmt(f"B{nrow + 3}:{col_letter(len(CATS))}{act + 1}", number="0.0")
+    config.cond_formats.append(CondFormat(f"B{act + 1}:{col_letter(len(CATS))}{act + 1}", "scale",
+                                          min_color="#B7E1CD", mid_color="#FFFFFF", max_color="#F4CCCC",
+                                          mid_value=6))
     config.widths = {0: 140, 1: 80, 2: 420}
     config.frozen_rows = 1
 
@@ -466,32 +489,38 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
         my.set(f"B{r}", f'=IF(A{r}="","",COUNTIF($C${r_first}:$C${r_last},A{r}))')
     my.cond_formats.append(CondFormat(f"A{tr2 + 2}:B{tr2 + 1 + rounds}", "formula",
                                       f'=AND(ISNUMBER($B{tr2 + 2}),$B{tr2 + 2}>=3)', bg=BAD, bold=True))
-    # Punt Advisor: project end-of-draft category totals per build and count wins.
-    #   projected(cat) = my total now
-    #                  + for each of my remaining picks p: the z of the available player ranked
-    #                    (p - CurrentPick + 1) by that build's value (what the build lands there)
-    #                  - the average team's full roster
+    # Punt Advisor: project end-of-draft category edges per build, turn them into weekly
+    # win probabilities with each category's noise (Config CatSigma), rank by P(win week).
+    #   edge(cat) = my total now
+    #             + for each of my remaining picks p: the ~5 available players around depth
+    #               (p - CurrentPick + 1) when sorted by that build's value
+    #             - the average team's full roster
+    #   P(cat)   = NORM.DIST(edge / sigma(cat))   -- punted categories still count: a noisy
+    #                                                punt (STL, FT%) still steals some weeks
+    #   P(week)  = P(5+ of 9), normal approximation to the sum of the 9 category wins
     a0 = ADV_C0
-    my.set(f"{L(a0)}2", "Punt Advisor — projected categories won vs. an average team (need 5 of 9)")
+    my.set(f"{L(a0)}2", "Punt Advisor — chance to win a week (5+ of 9 categories) for each build")
     my.fmt(f"{L(a0)}2", bold=True, size=12)
-    my.put(3, a0, ("Weights (1 = counts, 0 = punted). Projection = your z's now + for each of your "
-                   "remaining picks, the ~5 available players at that depth when sorted by the build's value, "
-                   "minus the average team's full roster. Check the matching Punt boxes on Config "
-                   "to re-sort the Board."))
+    my.put(3, a0, ("Weights = what the build drafts for (0 = punted). Edge = your z's now + what the build "
+                   "lands at each of your remaining picks − the average team. Win% per category = edge vs. "
+                   "that category's weekly noise (Config); steady cats (REB/AST/PTS) convert edges into wins, "
+                   "noisy ones (STL/FG%/FT%/A-T) don't. Tick the matching Punt boxes on Config to re-sort the Board."))
     my.fmt(f"{L(a0)}4", italic=True, fg="#666666")
     hdr_r = ADV_R0                                   # 1-based header row
+    nc = len(CATS)
+    proj0 = a0 + nc + 2                              # edge grid
+    win0 = proj0 + nc                                # per-category win% grid
+    exp_c, week_c, key_c, off_c = win0 + nc, win0 + nc + 1, win0 + nc + 2, win0 + nc + 3
     my.put_row(hdr_r - 1, a0, ["Build"] + [CAT_LABELS[c] for c in CATS])
-    proj0 = a0 + len(CATS) + 2                       # projected diffs grid starts here
-    my.put_row(hdr_r - 1, proj0, [f"Proj {CAT_LABELS[c]}" for c in CATS]
-               + ["Cats won", "Cats counted", "Margin", "Rank key"])
-    _hdr(my, f"{L(a0)}{hdr_r}:{L(proj0 + len(CATS) + 3)}{hdr_r}")
+    my.put_row(hdr_r - 1, proj0, [f"Edge {CAT_LABELS[c]}" for c in CATS]
+               + [f"Win% {CAT_LABELS[c]}" for c in CATS] + ["Exp cats", "Win week", "Rank key"])
+    _hdr(my, f"{L(a0)}{hdr_r}:{L(key_c)}{hdr_r}")
     # Hidden helper: offsets of my remaining picks from the current pick (1 = on the clock).
-    off_c = proj0 + len(CATS) + 4
     my.put(hdr_r - 1, off_c, "Pick offsets")
     my.put(hdr_r, off_c, (f'=IFERROR(FILTER({LOG("A")}-CurrentPick+1,{LOG("E")},'
                           f'{LOG("A")}>=CurrentPick),"")'))
     offs = f"${L(off_c)}${hdr_r + 1}:${L(off_c)}${hdr_r + rounds}"
-    my.hidden_cols.append(off_c)
+    my.hidden_cols += [off_c, key_c]
     n_b = len(ADVISOR_BUILDS)
     for b, (label, punts) in enumerate(ADVISOR_BUILDS):
         r = hdr_r + 1 + b
@@ -506,15 +535,14 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
             future = (f'IFERROR(SUMPRODUCT({srt},COUNTIFS({offs},">="&({seq}-2),{offs},"<="&({seq}+2)))/5,0)')
             avg_full = f"SUMPRODUCT({zc}*({P(C.inpool)}=TRUE))/NumTeams"
             my.put(r - 1, proj0 + k, f"={me_now}+{future}-{avg_full}")
-        w_rng = f"{L(a0 + 1)}{r}:{L(a0 + len(CATS))}{r}"
-        p_rng = f"{L(proj0)}{r}:{L(proj0 + len(CATS) - 1)}{r}"
-        my.put(r - 1, proj0 + len(CATS), f"=SUMPRODUCT(({p_rng}>0)*{w_rng})")
-        my.put(r - 1, proj0 + len(CATS) + 1, f"=SUM({w_rng})")
-        my.put(r - 1, proj0 + len(CATS) + 2, f"=SUMPRODUCT({p_rng}*{w_rng})")
-        won, mg = L(proj0 + len(CATS)), L(proj0 + len(CATS) + 2)
-        my.put(r - 1, proj0 + len(CATS) + 3, f"={won}{r}+{mg}{r}/1000")
+            my.put(r - 1, win0 + k, f"=NORM.DIST({L(proj0 + k)}{r}/INDEX(CatSigma,1,{k + 1}),0,1,TRUE)")
+        w_rng = f"{L(win0)}{r}:{L(win0 + nc - 1)}{r}"
+        my.put(r - 1, exp_c, f"=SUM({w_rng})")
+        my.put(r - 1, week_c, (f"=1-NORM.DIST(4.5,{L(exp_c)}{r},"
+                               f"SQRT(MAX(0.01,SUMPRODUCT({w_rng},1-{w_rng}))),TRUE)"))
+        my.put(r - 1, key_c, f"={L(week_c)}{r}+{L(exp_c)}{r}/1000")
     b_first, b_last = hdr_r + 1, hdr_r + n_b
-    key = L(proj0 + len(CATS) + 3)
+    key = L(key_c)
     rec_r = b_last + 2
     my.set(f"{L(a0)}{rec_r}", "Best fit now:")
     my.set(f"{L(a0 + 1)}{rec_r}", (f"=INDEX({L(a0)}{b_first}:{L(a0)}{b_last},"
@@ -523,18 +551,22 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     my.cond_formats.append(CondFormat(f"{L(a0)}{b_first}:{L(a0)}{b_last}", "formula",
                                       f"=${key}{b_first}=MAX(${key}${b_first}:${key}${b_last})",
                                       bg=GOOD, bold=True))
-    pg = f"{L(proj0)}{b_first}:{L(proj0 + len(CATS) - 1)}{b_last}"
-    my.cond_formats.append(CondFormat(pg, "formula", f"={L(a0 + 1)}{b_first}=0", fg=GRAY, bg=GRAY_BG))
+    pg = f"{L(proj0)}{b_first}:{L(proj0 + nc - 1)}{b_last}"
+    wg = f"{L(win0)}{b_first}:{L(win0 + nc - 1)}{b_last}"
+    for grid, src in ((pg, proj0), (wg, win0)):
+        my.cond_formats.append(CondFormat(grid, "formula", f"={L(a0 + 1)}{b_first}=0", fg=GRAY, bg=GRAY_BG))
     my.cond_formats.append(CondFormat(pg, "scale"))
+    my.cond_formats.append(CondFormat(wg, "scale", mid_value=0.5))
     my.fmt(pg, number="0.0")
-    my.fmt(f"{L(proj0 + len(CATS) + 2)}{b_first}:{L(proj0 + len(CATS) + 2)}{b_last}", number="0.0")
-    my.hidden_cols.append(proj0 + len(CATS) + 3)
-    for c in range(a0 + 1, a0 + 1 + len(CATS)):
+    my.fmt(wg, number="0%")
+    my.fmt(f"{L(exp_c)}{b_first}:{L(exp_c)}{b_last}", number="0.0")
+    my.fmt(f"{L(week_c)}{b_first}:{L(week_c)}{b_last}", number="0%", bold=True)
+    for c in range(a0 + 1, a0 + 1 + nc):
         my.widths[c] = 38
-    for c in range(proj0, proj0 + len(CATS)):
-        my.widths[c] = 52
+    for c in range(proj0, win0 + nc):
+        my.widths[c] = 50
     my.widths[a0] = 120
-    my.widths[a0 + len(CATS) + 1] = 16
+    my.widths[a0 + nc + 1] = 16
 
     my.widths.update({0: 190, 1: 60, 2: 90, 3: 60})
     my.frozen_rows = 3

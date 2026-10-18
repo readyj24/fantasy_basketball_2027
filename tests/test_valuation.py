@@ -88,3 +88,37 @@ def test_team_counts_change_replacement(synthetic_players):
     # Deeper league -> lower replacement level -> bigger surplus for the same player.
     best = out["value14"].idxmax()
     assert out.loc[best, "value14"] > out.loc[best, "value12"]
+
+
+def test_category_noise_units(synthetic_players):
+    from draftboard.valuation import category_noise
+    vals = value_all(synthetic_players, [12], 14, VCFG)
+    ncfg = {"weekly_games_per_player": 2.8, "team_spread_factor": 0.0,
+            "phi": {c: 1.0 for c in ["pts", "reb", "ast", "stl", "blk", "fg3m", "tov", "fg_pct", "ft_pct"]}}
+    sig = category_noise(vals, 12, 14, ncfg)
+    pool = vals[vals["pool12"]]
+    # Counting stat, Poisson (phi=1): sqrt(2 x 14 x mean / G) / sd
+    exp = np.sqrt(2 * 14 * pool["stl"].mean() / 2.8) / pool["stl"].std(ddof=0)
+    assert sig.loc["stl", "sigma"] == pytest.approx(exp)
+    # More games per week -> less noise; opponent spread only adds.
+    sig2 = category_noise(vals, 12, 14, dict(ncfg, weekly_games_per_player=5.6))
+    assert (sig2["sigma"] < sig["sigma"]).all()
+    sig3 = category_noise(vals, 12, 14, dict(ncfg, team_spread_factor=0.7))
+    assert (sig3["sigma"] > sig["sigma"]).all()
+
+
+def test_fit_noise_poisson_and_binomial():
+    from scripts.fit_noise import fit
+    rng = np.random.default_rng(0)
+    rows = []
+    for pid in range(40):
+        lam, fga = 1 + pid / 20, 10 + pid % 8
+        for _ in range(60):
+            fgm = rng.binomial(fga, 0.48)
+            rows.append({"PLAYER_ID": pid, "MIN": 30, "PTS": rng.poisson(15), "REB": rng.poisson(6),
+                         "AST": rng.poisson(4), "STL": rng.poisson(lam), "BLK": rng.poisson(lam),
+                         "TOV": rng.poisson(2), "FG3M": rng.poisson(2), "FGM": fgm, "FGA": fga,
+                         "FTM": rng.binomial(5, 0.8), "FTA": 5})
+    phi = fit(pd.DataFrame(rows))
+    assert phi["stl"] == pytest.approx(1.0, abs=0.15)          # Poisson -> 1
+    assert phi["fg_pct"] == pytest.approx(1.0, abs=0.2)        # fixed attempts, binomial -> ~1

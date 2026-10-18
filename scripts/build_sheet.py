@@ -11,11 +11,14 @@ import pandas as pd  # noqa: E402
 
 from draftboard import ROOT, load_config  # noqa: E402
 from draftboard.board import build_workbook  # noqa: E402
-from draftboard.valuation import display_stats  # noqa: E402
+from draftboard.valuation import category_noise, display_stats  # noqa: E402
 
 
 def load_workbook_model(cfg: dict):
     vals = pd.read_csv(ROOT / cfg["paths"]["values"], keep_default_na=False)
+    lg = cfg["league"]
+    # Noise uses the full pool (before trimming to max_players).
+    noise = {n: category_noise(vals, n, lg["rounds"], cfg["noise"]) for n in lg["team_count_options"]}
     nt = cfg["league"]["num_teams"]
     vals = vals.sort_values(f"value{nt}", ascending=False).head(cfg["board"]["max_players"])
     vals = vals.sort_values("name", key=lambda s: s.str.lower()).reset_index(drop=True)
@@ -23,7 +26,7 @@ def load_workbook_model(cfg: dict):
     schedule = None
     if sched_path and (ROOT / sched_path).exists():
         schedule = pd.read_csv(ROOT / sched_path, keep_default_na=False)
-    return build_workbook(vals, display_stats(vals), cfg, schedule)
+    return build_workbook(vals, display_stats(vals), cfg, schedule, noise)
 
 
 def main() -> None:

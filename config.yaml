@@ -26,6 +26,20 @@ valuation:
                                  # positional: each player vs. his own position's line
   missing_adp: 250
 
+noise:                           # Punt Advisor win probabilities (see valuation.category_noise)
+  weekly_games_per_player: 2.8   # counted games per roster spot per week (10 active slots)
+  team_spread_factor: 0.7        # opponent-roster spread vs. random 14-player teams
+  phi:                           # per-game variance / base; scripts/fit_noise.py refits from game logs
+    pts: 2.5
+    reb: 1.2
+    ast: 1.2
+    stl: 1.05
+    blk: 1.3
+    fg3m: 1.3
+    tov: 1.1
+    fg_pct: 1.6                  # > 1: shot-volume and lineup-mix swings on top of make/miss luck
+    ft_pct: 1.4
+
 opponents:
   adp_weight: 0.5                # opp_rank = w * ADP + (1 - w) * Yahoo rank
   sigma_mult: 0.18

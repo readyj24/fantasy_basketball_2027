@@ -135,3 +135,38 @@ def display_stats(df: pd.DataFrame) -> pd.DataFrame:
         "ast": df["ast"].round(1), "stl": df["stl"].round(1), "blk": df["blk"].round(1),
         "a_to": (df["ast"] / df["tov"].replace(0, np.nan)).round(2),
     }).fillna(0)
+
+
+def category_noise(vals: pd.DataFrame, n: int, rounds: int, ncfg: dict) -> pd.DataFrame:
+    """Weekly H2H noise per category, in the same units as summed surplus z's.
+
+    For a matchup, P(win cat) ~ Phi(projected z edge / sigma). sigma combines:
+      week:  game-to-game randomness of both teams' weekly totals. Each player-game's
+             variance = phi_c x base, where base is the mean (counting stats), the binomial
+             att x p(1-p) (FG%/FT% impact), or AST + r^2 TO (A/T impact); phi_c (>= 1)
+             inflates that for streakiness, shot-volume and lineup-mix swings.
+      teams: how much a random opponent's roster differs from the average team.
+    Converting weekly totals to z units: expected weekly edge = G x s_c x z-edge, with
+    G = counted games per roster spot per week and s_c the pool sd of the per-game stat.
+    """
+    pool = vals[vals[f"pool{n}"].astype(str).str.lower() == "true"]
+    phi = ncfg["phi"]
+    G = ncfg["weekly_games_per_player"]
+    p_fg = pool["fgm"].sum() / pool["fga"].sum()
+    p_ft = pool["ftm"].sum() / pool["fta"].sum()
+    r = pool["ast"].sum() / pool["tov"].sum()
+    per_game = {c: pool[c].astype(float) for c in COUNTING}
+    per_game["fg_pct"] = pool["fgm"] - pool["fga"] * p_fg
+    per_game["ft_pct"] = pool["ftm"] - pool["fta"] * p_ft
+    per_game["a_to"] = pool["ast"] - r * pool["tov"]
+    var = {c: phi[c] * pool[c].astype(float) for c in COUNTING}
+    var["fg_pct"] = phi["fg_pct"] * pool["fga"] * p_fg * (1 - p_fg)
+    var["ft_pct"] = phi["ft_pct"] * pool["fta"] * p_ft * (1 - p_ft)
+    var["a_to"] = phi["ast"] * pool["ast"] + r ** 2 * phi["tov"] * pool["tov"]
+    rows = []
+    for c in CATS:
+        s = per_game[c].std(ddof=0)
+        week = np.sqrt(2 * rounds * var[c].mean() / G) / s
+        teams = ncfg["team_spread_factor"] * np.sqrt(rounds) * pool[f"z{n}_{c}"].astype(float).std(ddof=0)
+        rows.append({"cat": c, "week": week, "teams": teams, "sigma": float(np.hypot(week, teams))})
+    return pd.DataFrame(rows).set_index("cat")

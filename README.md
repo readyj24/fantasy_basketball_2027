@@ -79,10 +79,18 @@ Name fixes: add `data/name_overrides.csv` with columns `source_name,projection_n
 ## Choosing a punt (My Team → Punt Advisor)
 
 For six builds (balanced, punt FT%, FG%, AST+A/T, BLK, 3PTM) the advisor projects your
-end-of-draft total in each category: your current z's, plus for each remaining pick the
-~5 available players at that depth when sorted by the build's value, minus the average
-team's full roster. It counts categories won among the ones the build keeps (5 of 9
-wins the week) and ranks builds by wins, then margin. "Best fit now" is the leader.
+end-of-draft edge over the average team in each category: your current z's, plus for each
+remaining pick the ~5 available players at that depth when sorted by the build's value,
+minus the average team's full roster. Each edge becomes a weekly **win %** using that
+category's noise (Config → Category noise: steady REB/AST/PTS convert edges into wins,
+noisy STL/FG%/FT%/A-T don't), and builds are ranked by **Win week** = P(5+ of 9).
+Punted categories still count — a noisy punt still steals some weeks. A "punt" means
+"stop drafting for it", which can also be a category you've already locked up.
+
+Noise model (`valuation.category_noise`): per-game variance = phi × base (mean for counts,
+att·p(1−p) for FG%/FT%), scaled to weekly team totals, plus opponent-roster spread. `phi`
+defaults are estimates; `python scripts/fit_noise.py gamelogs.csv` refits them from a
+season of player game logs.
 
 - Before your 2nd–3rd pick it is mostly noise; let rounds 1–2 be best-available.
 - Commit around round 3–4: tick the matching **Punt** boxes on Config so the Board
