@@ -19,7 +19,11 @@ def load_workbook_model(cfg: dict):
     nt = cfg["league"]["num_teams"]
     vals = vals.sort_values(f"value{nt}", ascending=False).head(cfg["board"]["max_players"])
     vals = vals.sort_values("name", key=lambda s: s.str.lower()).reset_index(drop=True)
-    return build_workbook(vals, display_stats(vals), cfg)
+    sched_path = cfg["paths"].get("schedule")
+    schedule = None
+    if sched_path and (ROOT / sched_path).exists():
+        schedule = pd.read_csv(ROOT / sched_path, keep_default_na=False)
+    return build_workbook(vals, display_stats(vals), cfg, schedule)
 
 
 def main() -> None:

@@ -14,8 +14,10 @@ pip install -r requirements.txt
 
 # 1. Data. Save the Hashtag projections page (File > Save page as > .html) and import it:
 python scripts/import_hashtag.py path/to/Hashtag_Basketball.html   # -> data/raw/projections.csv
-#    Optional: data/raw/adp.csv (Yahoo/FantasyPros ADP) and data/raw/yahoo_rank.csv
-#    (Yahoo draft-room order; a single "Player" column in order is enough). Paths in config.yaml.
+#    Yahoo: paste the draft-room player list into data/raw/yahoo_board.txt, then
+python scripts/import_yahoo.py        # -> data/raw/adp.csv (L7ADP) + data/raw/yahoo_rank.csv (XRank order)
+#    Schedule: save Hashtag's NBA Schedule Grid (Yahoo weeks) as .html and run import_hashtag.py on it
+#    -> data/raw/schedule.csv; becomes the Schedule tab + playoff-week games on My Team.
 
 # 2. Valuation (z's for 12, 13 and 14 teams; prints fuzzy name matches under 95 to fix)
 python scripts/build_data.py                                       # -> data/players.csv, data/values.csv
@@ -51,6 +53,7 @@ Name fixes: add `data/name_overrides.csv` with columns `source_name,projection_n
 | **Log** | Pick # 1–196 prefilled; round + snake team computed; **Player** dropdown (type to filter). Rows beyond TotalPicks are grayed and ignored. Your rows highlighted |
 | **Players** | Static projections and z's for every team count + live Value, PAvail, Score, AdjADP, ★ |
 | **My Team** | Your picks with z's, category totals vs. average team, G/F/C fill check, NBA-team concentration |
+| **Schedule** | Games per NBA team per Yahoo week; `PlayoffStart`/`PlayoffEnd` on Config pick the playoff weeks summed on Players and My Team |
 | **Cheatsheet** | Static rankings for balanced / punt FT% / punt AST+A/T / punt FG% (printable backup) |
 
 ### Model

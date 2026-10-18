@@ -9,6 +9,7 @@ league:
   rounds: 14               # G,G,G,F,F,F,C,Util,Util,Util + 4 BN
   my_slot: 1               # fill in once Yahoo shows the draft order
   starting_slots: {G: 3, F: 3, C: 1}
+  playoff_weeks: [18, 19, 20]   # Yahoo week numbers; editable live on Config
   categories: [FG%, FT%, 3PTM, PTS, REB, AST, STL, BLK, A/T]
 
 valuation:
@@ -40,8 +41,9 @@ matching:
 paths:
   projections: data/raw/projections.csv
   projections_secondary: null    # optional second projection source to average in
-  adp: data/raw/adp_hashtag.csv   # stopgap from the Hashtag page; swap for Yahoo ADP
+  adp: data/raw/adp.csv             # Yahoo L7ADP (scripts/import_yahoo.py)
   yahoo_rank: data/raw/yahoo_rank.csv
+  schedule: data/raw/schedule.csv   # team x Yahoo-week games grid (Hashtag schedule grid)
   players: data/players.csv
   values: data/values.csv
   xlsx: out/juice_draft_board.xlsx

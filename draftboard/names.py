@@ -22,7 +22,9 @@ def normalize_name(name: str) -> str:
     s = re.sub(r"\(.*?\)", " ", s)            # "Nikola Jokic (DEN - C)"
     s = re.sub(r"[.'`’]", "", s)               # O'Neale -> oneale, P.J. -> pj
     s = re.sub(r"[^a-z0-9 ]+", " ", s)         # hyphens, commas
-    parts = [p for p in s.split() if p not in _SUFFIXES]
+    # Drop Jr./III etc. but never the first token ("V. Wembanyama" is not a suffix).
+    parts = s.split()
+    parts = parts[:1] + [p for p in parts[1:] if p not in _SUFFIXES]
     return " ".join(parts)
 
 

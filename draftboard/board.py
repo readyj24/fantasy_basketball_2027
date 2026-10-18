@@ -47,14 +47,17 @@ class Cols:
         for n in team_counts:
             self.pooln[n] = nxt
             nxt += 1
-        self.width = nxt
+        self.playoff = nxt                                     # playoff-week games (Schedule tab)
+        self.width = nxt + 1
 
 
 def _hdr(sheet: Sheet, rng: str) -> None:
     sheet.fmt(rng, bold=True, bg=HEADER_BG, fg=HEADER_FG, align="CENTER", wrap=True)
 
 
-def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict) -> Workbook:
+def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
+                   schedule: pd.DataFrame | None = None) -> Workbook:
+    """schedule: optional team x week games grid (columns 'team', 1..N)."""
     lg, opp, bcfg = cfg["league"], cfg["opponents"], cfg["board"]
     counts = sorted(lg["team_count_options"])
     if counts != list(range(counts[0], counts[0] + len(counts))):
@@ -74,6 +77,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict) -> Wor
     pl = wb.add("Players")
     my = wb.add("My Team")
     cheat = wb.add("Cheatsheet")
+    sched = wb.add("Schedule") if schedule is not None else None
     board.tab_color, log.tab_color, config.tab_color = "#34A853", "#4285F4", "#FBBC04"
 
     def P(col: int, absolute_rows: bool = True) -> str:
@@ -96,6 +100,8 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict) -> Wor
         ("DriftWindow", opp["drift_window"], "Drift = median(pick − opp_rank) over this many picks"),
         ("DriftMinPicks", opp["drift_min_picks"], "Drift = 0 until this many picks are logged"),
         ("SleeperGap", bcfg["sleeper_gap"], "★ when value rank beats ADP rank by this much"),
+        ("PlayoffStart", lg["playoff_weeks"][0], "first fantasy playoff week (Yahoo week #)"),
+        ("PlayoffEnd", lg["playoff_weeks"][-1], "last fantasy playoff week"),
             ]
     config.put_row(0, 0, ["Setting", "Value", "Notes"])
     _hdr(config, "A1:C1")
@@ -126,6 +132,30 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict) -> Wor
     wb.named["WeightsRow"] = ("Config", f"$B${wrow + 1}:${col_letter(len(CATS))}${wrow + 1}")
     config.widths = {0: 140, 1: 80, 2: 420}
     config.frozen_rows = 1
+
+    # ------------------------------------------------------------------ Schedule
+    if sched is not None:
+        weeks = [c for c in schedule.columns if c != "team"]
+        sched.put_row(0, 0, ["Team"] + [int(w) for w in weeks])
+        _hdr(sched, f"A1:{col_letter(len(weeks))}1")
+        for i, row in schedule.reset_index(drop=True).iterrows():
+            sched.put_row(i + 1, 0, [row["team"]] + [int(row[w]) for w in weeks])
+        s_last = len(schedule) + 1
+        wk_end = col_letter(len(weeks))
+        S_TEAMS = f"Schedule!$A$2:$A${s_last}"
+        S_WEEKS = f"Schedule!$B$1:${wk_end}$1"
+        S_GRID = f"Schedule!$B$2:${wk_end}${s_last}"
+        sched.cond_formats.append(CondFormat(f"B2:{wk_end}{s_last}", "scale", min_color="#F4CCCC",
+                                             mid_color="#FFFFFF", max_color="#B7E1CD", mid_value=3))
+        sched.cond_formats.append(CondFormat(f"A1:{wk_end}{s_last}", "formula",
+                                             "=AND(A$1>=" + str(lg["playoff_weeks"][0]) + ",A$1<="
+                                             + str(lg["playoff_weeks"][-1]) + ")", bold=True))
+        sched.frozen_rows, sched.frozen_cols = 1, 1
+        sched.widths = {0: 60}
+
+        def playoff_games(team_ref: str) -> str:
+            return (f"SUMPRODUCT(({S_TEAMS}={team_ref})*({S_WEEKS}>=PlayoffStart)"
+                    f"*({S_WEEKS}<=PlayoffEnd)*{S_GRID})")
 
     # ------------------------------------------------------------------ Log
     log.put_row(0, 0, ["Pick", "Round", "Team", "Player (type to search)", "Mine",
@@ -165,6 +195,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict) -> Wor
         for i, c in enumerate(C.zn[nt]):
             header[c] = f"z{nt} {CAT_LABELS[CATS[i]]}"
         header[C.pooln[nt]] = f"pool{nt}"
+    header[C.playoff] = "Playoff G"
     pl.put_row(0, 0, header)
     _hdr(pl, f"A1:{col_letter(C.width - 1)}1")
 
@@ -201,6 +232,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict) -> Wor
                 vals[C.zn[nt][k]] = float(row[f"z{nt}_{cat}"])
         for nt in counts:
             vals[C.pooln[nt]] = bool(row[f"pool{nt}"])
+        vals[C.playoff] = f"={playoff_games(f'{L(C.team)}{R}')}" if sched is not None else ""
         for c, v in vals.items():
             pl.put(r, c, v)
 
@@ -313,6 +345,25 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict) -> Wor
                f"=SUMPRODUCT({P(pcol)}*({P(C.inpool)}=TRUE))/NumTeams*MyCount/Rounds")
         my.set(f"{colL}{tr + 2}", f"={colL}{tr}-{colL}{tr + 1}")
     my.fmt(f"E{r_first}:{L(4 + len(CATS))}{tr + 2}", number="0.00")
+    if sched is not None:
+        # Playoff-week games per player: one column per week from PlayoffStart, then the total.
+        pc0 = len(my_hdr)                                     # first column after A/T
+        for j in range(3):
+            colL = L(pc0 + j)
+            my.set(f"{colL}3", f'="Wk "&(PlayoffStart+{j})')
+            for r in range(r_first, r_last + 1):
+                my.set(f"{colL}{r}", (f'=IF($A{r}="","",IFERROR(INDEX({S_GRID},MATCH($C{r},{S_TEAMS},0),'
+                                      f'MATCH(PlayoffStart+{j},{S_WEEKS},0)),""))'))
+            my.set(f"{colL}{tr}", f"=SUM({colL}{r_first}:{colL}{r_last})")
+        tot = L(pc0 + 3)
+        my.set(f"{tot}3", '="Playoff G (Wk "&PlayoffStart&"–"&PlayoffEnd&")"')
+        for r in range(r_first, r_last + 1):
+            my.set(f"{tot}{r}", f'=IF($A{r}="","",{playoff_games(f"$C{r}")})')
+        my.set(f"{tot}{tr}", f"=SUM({tot}{r_first}:{tot}{r_last})")
+        _hdr(my, f"{L(pc0)}3:{tot}3")
+        my.cond_formats.append(CondFormat(f"{L(pc0)}{r_first}:{L(pc0 + 2)}{r_last}", "scale",
+                                          min_color="#F4CCCC", mid_color="#FFFFFF",
+                                          max_color="#B7E1CD", mid_value=3))
     my.fmt(f"A{tr}:{L(4 + len(CATS))}{tr + 2}", bold=True)
     diff_rng = f"E{tr + 2}:{L(4 + len(CATS))}{tr + 2}"
     my.cond_formats.append(CondFormat(diff_rng, "formula", f"=E{tr + 2}>=0", bg=GOOD))
