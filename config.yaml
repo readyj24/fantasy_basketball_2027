@@ -55,5 +55,5 @@ board:
 
 gsheets:
   service_account_json: secrets/service_account.json
-  spreadsheet_id: null           # or set spreadsheet_title and share it with the SA
+  spreadsheet_id: 1k2fz_fpu7vvQJ1y-VeWSowAnOW03H6AEgxxvxw3BgCA
   spreadsheet_title: Juice League Draft Board
