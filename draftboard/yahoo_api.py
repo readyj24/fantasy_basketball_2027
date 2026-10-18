@@ -31,7 +31,7 @@ class YahooClient:
     # ---------------------------------------------------------------- auth
     def auth_url(self) -> str:
         q = {"client_id": self.app["client_id"], "redirect_uri": self.app["redirect_uri"],
-             "response_type": "code", "language": "en-us"}
+             "response_type": "code", "language": "en-us", "scope": "fspt-r"}
         return f"{AUTH_URL}?{urllib.parse.urlencode(q)}"
 
     def _token_request(self, data: dict) -> None:
