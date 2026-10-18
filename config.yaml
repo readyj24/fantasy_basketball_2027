@@ -14,7 +14,8 @@ league:
 
 valuation:
   full_season_games: 75          # availability: min(1, games/75) ^ exponent
-  availability_exponent: 0.5
+  availability_exponent: 1.0      # value = share of games x per-game surplus (no IL slots); spec had 0.5
+  replacement_min_availability: 0.8  # replacement line drawn from healthy players only
   iterations: 2                  # rank -> re-pick pool -> recompute
   # Replacement level: for each of G/F/C, average the first N players eligible at that
   # position ranked from (pool size + offset) down. Offset -16 = from ~#180 at 14 teams

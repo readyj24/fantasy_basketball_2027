@@ -59,25 +59,28 @@ def test_replacement_lines_by_position(synthetic_players):
     assert v["in_pool"].sum() == pool
     assert set(order[:pool]) == set(v.index[v["in_pool"]])
 
-    # Hand calc: 5 players eligible at each position, starting from rank pool - 16 (#153).
-    below = order[pool - 16:]
+    # Hand calc: 5 healthy players eligible at each position, starting from rank pool - 16.
+    avail = availability(df["games"], 75, 0.5)
+    below = [i for i in order[pool - 16:] if avail.loc[i] >= 0.8]
     lines = {p: z.loc[[i for i in below if p in df.at[i, "yahoo_positions"].split(",")][:5]].mean()
              for p in "GFC"}
     blended = (lines["G"] + lines["F"] + lines["C"]) / 3
-    assert (z - v[CATS]).iloc[0].tolist() == pytest.approx(blended.tolist())
-    assert (z - v[CATS]).round(9).drop_duplicates().shape[0] == 1      # same line for everyone
+    # surplus = availability x (per-game z - replacement line)
+    i = df.index[0]
+    assert v.loc[i, CATS].tolist() == pytest.approx(((z.loc[i] - blended) * avail.loc[i]).tolist())
 
 
 def test_positional_mode_uses_easiest_line(synthetic_players):
     pool = 168
     df = synthetic_players.reset_index(drop=True)
     z, order = pooled_zscores(df, pool, VCFG)
-    lines = position_lines(df, z, order, pool, VCFG)
+    avail = availability(df["games"], 75, 0.5)
+    lines = position_lines(df, z, order, pool, VCFG, avail >= 0.8)
     p = value_players(df, pool, dict(VCFG, replacement_mode="positional"))
     for i in df.index[:40]:
         elig = df.at[i, "yahoo_positions"].split(",")
         best = min((lines[x] for x in elig), key=lambda s: s.sum())
-        assert (z.loc[i] - p.loc[i, CATS]).tolist() == pytest.approx(best.tolist())
+        assert (p.loc[i, CATS] / avail.loc[i]).tolist() == pytest.approx((z.loc[i] - best).tolist())
 
 
 def test_team_counts_change_replacement(synthetic_players):

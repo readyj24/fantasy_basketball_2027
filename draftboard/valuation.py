@@ -44,23 +44,26 @@ def availability(games: pd.Series, full: float, exponent: float) -> pd.Series:
     return np.minimum(1.0, games.astype(float).clip(lower=0) / full) ** exponent
 
 
-def zscores(df: pd.DataFrame, pool: pd.Series, avail: pd.Series) -> pd.DataFrame:
+def zscores(df: pd.DataFrame, pool: pd.Series) -> pd.DataFrame:
+    """Per-game z's against the pool (availability is applied to the surplus later)."""
     imp = raw_impacts(df, pool)
     mu = imp[pool].mean()
     sd = imp[pool].std(ddof=0).replace(0, 1.0)
-    return ((imp - mu) / sd).mul(avail, axis=0)
+    return (imp - mu) / sd
 
 
 POSITIONS = ("G", "F", "C")
 
 
 def position_lines(df: pd.DataFrame, z: pd.DataFrame, order: pd.Index, pool_size: int,
-                   vcfg: dict) -> dict[str, pd.Series]:
+                   vcfg: dict, eligible: pd.Series | None = None) -> dict[str, pd.Series]:
     """Per-position replacement line: mean z of the first `replacement_per_position` players
     eligible at that position, ranked from pool_size + replacement_start_offset onward."""
     start = max(0, pool_size + int(vcfg.get("replacement_start_offset", 0)))
     k = max(1, int(vcfg.get("replacement_per_position", 5)))
     below = order[start:]
+    if eligible is not None:                     # replacement = healthy waiver-level players
+        below = [i for i in below if eligible.loc[i]]
     lines = {}
     for p in POSITIONS:
         elig = [i for i in below if p in str(df.at[i, "yahoo_positions"]).split(",")][:k]
@@ -70,14 +73,14 @@ def position_lines(df: pd.DataFrame, z: pd.DataFrame, order: pd.Index, pool_size
 
 
 def replacement_line(df: pd.DataFrame, z: pd.DataFrame, order: pd.Index, pool_size: int,
-                     vcfg: dict) -> pd.DataFrame:
+                     vcfg: dict, eligible: pd.Series | None = None) -> pd.DataFrame:
     """Row-aligned replacement z's to subtract from every player.
 
     blended:    one line for everyone = average of the G, F and C lines.
     positional: each player is measured against the easiest-to-beat line among his
                 eligible positions (lowest replacement total), i.e. classic VORP.
     """
-    lines = position_lines(df, z, order, pool_size, vcfg)
+    lines = position_lines(df, z, order, pool_size, vcfg, eligible)
     blended = pd.concat(lines.values(), axis=1).mean(axis=1)
     if vcfg.get("replacement_mode", "blended") != "positional":
         return pd.DataFrame([blended.values] * len(df), index=df.index, columns=z.columns)
@@ -89,25 +92,33 @@ def replacement_line(df: pd.DataFrame, z: pd.DataFrame, order: pd.Index, pool_si
 
 
 def pooled_zscores(df: pd.DataFrame, pool_size: int, vcfg: dict) -> tuple[pd.DataFrame, pd.Index]:
-    """Availability-adjusted z's against the iterated top-`pool_size` pool, plus rank order."""
+    """Per-game z's against the iterated top-`pool_size` pool, plus rank order.
+
+    Players are ranked by availability-weighted value (z x share of games)."""
     if len(df) <= pool_size:
         raise ValueError(f"need more than {pool_size} projected players, have {len(df)}")
     avail = availability(df["games"], vcfg["full_season_games"], vcfg["availability_exponent"])
     pool = pd.Series(True, index=df.index)        # seed: everyone; then rank -> re-pool -> recompute
-    z = zscores(df, pool, avail)
+    z = zscores(df, pool)
     for _ in range(int(vcfg.get("iterations", 2))):
-        order = z.sum(axis=1).sort_values(ascending=False).index
+        order = z.sum(axis=1).mul(avail).sort_values(ascending=False).index
         pool = pd.Series(False, index=df.index)
         pool.loc[order[:pool_size]] = True
-        z = zscores(df, pool, avail)
-    return z, z.sum(axis=1).sort_values(ascending=False).index
+        z = zscores(df, pool)
+    return z, z.sum(axis=1).mul(avail).sort_values(ascending=False).index
 
 
 def value_players(df: pd.DataFrame, pool_size: int, vcfg: dict) -> pd.DataFrame:
-    """Return per-category surplus z's (replacement level subtracted) and pool flag."""
+    """Per-category surplus over replacement, times share of games played.
+
+    No IL slots: when a player sits, a bench player covers the lineup slot at roughly
+    replacement level, so missed games are worth zero surplus (not average production,
+    and not zero production)."""
     df = df.reset_index(drop=True)
     z, order = pooled_zscores(df, pool_size, vcfg)
-    surplus = z - replacement_line(df, z, order, pool_size, vcfg)
+    avail = availability(df["games"], vcfg["full_season_games"], vcfg["availability_exponent"])
+    healthy = avail >= vcfg.get("replacement_min_availability", 0.8)
+    surplus = (z - replacement_line(df, z, order, pool_size, vcfg, healthy)).mul(avail, axis=0)
     in_pool = pd.Series(False, index=df.index)
     in_pool.loc[order[:pool_size]] = True
     surplus["in_pool"] = in_pool

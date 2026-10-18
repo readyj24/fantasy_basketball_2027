@@ -60,6 +60,10 @@ Name fixes: add `data/name_overrides.csv` with columns `source_name,projection_n
 
 - **Counting cats**: z = (x − pool mean) / pool sd. **FG%/FT%**: z of `FGA × (FG% − pool FG%)`.
   **A/T**: z of `AST − r × TO`, r = pool AST/TO. Each z × `min(1, games/75)^0.5`.
+- **Availability** (no IL slots): Value = share of games (games/75, capped at 1) ×
+  per-game surplus over replacement. A missed game is covered by a bench player at about
+  replacement level, so it earns zero surplus. The replacement line uses only players with
+  ≥ 80% availability.
 - **Pool** = top NumTeams × 14 players (iterated twice). **Replacement level**: for each of
   G/F/C, the mean z of the first 5 players eligible there ranked from pool − 16 down
   (#180 at 14 teams, #152 at 12, #166 at 13); `blended` mode subtracts the average of the
