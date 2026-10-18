@@ -57,13 +57,31 @@ class Board:
         self.ss.values_batch_update({"valueInputOption": "USER_ENTERED", "data": [
             {"range": k, "values": [[v]]} for k, v in kw.items()]})
 
+    mode = "log"                                   # "log" = type into Log, "tab" = Draft checkboxes
+
+    def draft_rows(self) -> dict[str, int]:
+        if not hasattr(self, "_drows"):
+            names = self.ss.worksheet("Draft").get("C3:C", value_render_option=UNF)
+            self._drows = {r[0]: i + 3 for i, r in enumerate(names) if r}
+        return self._drows
+
     def clear_log(self) -> None:
         self.log_ws.batch_clear([f"D2:D{self.max_picks + 1}"])
+        n = len(self.draft_rows())
+        self.ss.worksheet("Draft").update([[False, False]] * n, f"A3:B{n + 2}",
+                                          value_input_option="USER_ENTERED")
 
-    def write_picks(self, start_pick: int, names: list[str]) -> None:
-        if names:
-            rng = f"D{start_pick + 1}:D{start_pick + len(names)}"
-            self.log_ws.update([[n] for n in names], rng, value_input_option="USER_ENTERED")
+    def write_picks(self, start_pick: int, names: list[str], mine: bool = False) -> None:
+        if not names:
+            return
+        if self.mode == "tab":
+            col = "B" if mine else "A"
+            rows = self.draft_rows()
+            self.ss.values_batch_update({"valueInputOption": "USER_ENTERED", "data": [
+                {"range": f"Draft!{col}{rows[n]}", "values": [[True]]} for n in names]})
+            return
+        rng = f"D{start_pick + 1}:D{start_pick + len(names)}"
+        self.log_ws.update([[n] for n in names], rng, value_input_option="USER_ENTERED")
 
     def players(self) -> list[dict]:
         rows = self.pl_ws.get("A1:Z", value_render_option=UNF)
@@ -83,8 +101,9 @@ class Board:
         return st
 
 
-def run_scenario(b: Board, n: int, slot: int, rounds: int, seed: int) -> dict[str, float]:
-    print(f"\n=== {n} teams, my slot {slot} ===")
+def run_scenario(b: Board, n: int, slot: int, rounds: int, seed: int, mode: str = "log") -> dict[str, float]:
+    b.mode = mode
+    print(f"\n=== {n} teams, my slot {slot}, picks via {'Draft tab checkboxes' if mode == 'tab' else 'Log'} ===")
     b.clear_log()
     b.set_config(NumTeams=n, MySlot=slot)
     time.sleep(2)
@@ -136,7 +155,7 @@ def run_scenario(b: Board, n: int, slot: int, rounds: int, seed: int) -> dict[st
             print(f"    pick {pick:3d} (rd {st['Round']}): {choice:26} Value {value[choice]:5.2f}  "
                   f"Score {st['table'][0][3]:5.2f}  Fit {st['table'][0][4]:5.2f}  PAvail {st['table'][0][6]:.0%}  "
                   f"opp picks until next {st['Opp picks until']}  Drift {st['Drift']:+.1f}")
-            b.write_picks(pick, [choice])
+            b.write_picks(pick, [choice], mine=True)
             drafted.append(choice)
             mine.append(choice)
         else:
@@ -168,7 +187,7 @@ def run_scenario(b: Board, n: int, slot: int, rounds: int, seed: int) -> dict[st
     check(n_drafted == total, f"end: {n_drafted} players marked drafted, expected {total}")
 
     # Grayed-out extra Log rows are ignored.
-    if total < b.max_picks:
+    if total < b.max_picks and mode == "log":
         leftover = next(p for p in opp_rank if p not in set(drafted))
         b.write_picks(total + 1, [leftover])
         st2 = b.named("CurrentPick")
@@ -179,7 +198,7 @@ def run_scenario(b: Board, n: int, slot: int, rounds: int, seed: int) -> dict[st
 
     team = b.my_ws.get("A4:A17", value_render_option=UNF)
     got = [r[0] for r in team if r and r[0]]
-    check(got == mine, f"My Team shows {got[:3]}... expected {mine[:3]}...")
+    check(sorted(got) == sorted(mine), f"My Team shows {sorted(got)[:3]}... expected {sorted(mine)[:3]}...")
     status = b.my_ws.get("A1:B60", value_render_option=UNF)
     for r in status:
         if r and r[0] in ("Status", "Picks left"):
@@ -211,8 +230,8 @@ def punt_test(b: Board, cat_row: int) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", default=None)
-    ap.add_argument("--scenarios", default="12:1,13:7,14:14",
-                    help="comma list of NumTeams:MySlot")
+    ap.add_argument("--scenarios", default="12:1,13:7,14:14,14:5:tab",
+                    help="comma list of NumTeams:MySlot[:tab] (tab = tick Draft-tab checkboxes)")
     ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args()
     cfg = load_config(args.config)
@@ -228,8 +247,10 @@ def main() -> None:
 
     values = {}
     for i, sc in enumerate(args.scenarios.split(",")):
-        n, slot = map(int, sc.split(":"))
-        values[n] = run_scenario(b, n, slot, lg["rounds"], args.seed + i)
+        parts = sc.split(":")
+        n, slot = int(parts[0]), int(parts[1])
+        values[n] = run_scenario(b, n, slot, lg["rounds"], args.seed + i,
+                                 parts[2] if len(parts) > 2 else "log")
 
     if len(values) > 1:
         ns = sorted(values)

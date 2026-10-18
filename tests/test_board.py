@@ -10,7 +10,7 @@ FUNCS = {
     "AND", "ARRAY_CONSTRAIN", "ROWS", "SEQUENCE", "COUNTIFS", "MIN", "OR", "TRIM", "SQRT", "COUNTIF", "CHOOSE", "COUNTIF", "FALSE", "FILTER", "IF", "IFERROR", "INDEX",
     "ISNUMBER", "ISODD", "LARGE", "LEFT", "MATCH", "MAX", "MEDIAN", "MINIFS", "MOD", "NORM",
     "DIST", "NOT", "RANK", "ROUNDUP", "SEARCH", "SORT", "SUM", "SUMPRODUCT", "TEXTJOIN", "TRUE",
-    "UNIQUE", "Log", "Players", "Config", "Board",
+    "UNIQUE", "Log", "Players", "Config", "Board", "Draft",
 }
 
 
@@ -69,7 +69,7 @@ def test_xlsx_renders(workbook, tmp_path):
     wb, _ = workbook
     out = render(wb, tmp_path / "b.xlsx")
     x = load_workbook(out)
-    assert x.sheetnames == ["Config", "Board", "Log", "Players", "My Team", "Cheatsheet"]
+    assert x.sheetnames == ["Config", "Board", "Draft", "Log", "Players", "My Team", "Cheatsheet"]
     assert "NumTeams" in x.defined_names
     assert x["Log"]["C2"].value.startswith("=IF(ISODD(")
 

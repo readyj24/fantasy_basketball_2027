@@ -65,7 +65,9 @@ class Cols:
         nxt += len(ADVISOR_BUILDS)
         self.fits = nxt                                        # fills a G/F/C need on my roster
         self.base = nxt + 1                                    # Fit or Value, per DynamicWeights
-        self.width = nxt + 2
+        self.drow = nxt + 2                                    # row of this player on the Draft tab
+        self.mine = nxt + 3                                    # drafted by me (Log or Draft tab)
+        self.width = nxt + 4
 
 
 def _hdr(sheet: Sheet, rng: str) -> None:
@@ -92,12 +94,18 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     wb = Workbook()
     config = wb.add("Config")
     board = wb.add("Board")
+    draft = wb.add("Draft")
     log = wb.add("Log")
     pl = wb.add("Players")
     my = wb.add("My Team")
     cheat = wb.add("Cheatsheet")
     sched = wb.add("Schedule") if schedule is not None else None
     board.tab_color, log.tab_color, config.tab_color = "#34A853", "#4285F4", "#FBBC04"
+    draft.tab_color = "#EA4335"
+    d_first, d_last = 3, n + 2                    # Draft tab data rows (1-based)
+
+    def D(col: str) -> str:
+        return f"Draft!${col}${d_first}:${col}${d_last}"
 
     def P(col: int, absolute_rows: bool = True) -> str:
         """Whole data column on Players, e.g. Players!$C$2:$C$401."""
@@ -256,6 +264,8 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     header[C.playoff] = "Playoff G"
     header[C.fits] = "Fills need"
     header[C.base] = "Score base"
+    header[C.drow] = "Draft row"
+    header[C.mine] = "Mine"
     for b, (label, _) in enumerate(ADVISOR_BUILDS):
         header[C.build[b]] = f"Value: {label}"
     pl.put_row(0, 0, header)
@@ -292,8 +302,13 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
             C.pavail: (f"=IF({L(C.drafted)}{R},0,1-NORM.DIST(TargetPick,{L(C.adjadp)}{R},"
                        f"MAX(SigmaMin,SigmaMult*{L(C.opp)}{R}),TRUE))"),
             C.star: (f'=TRIM(IF({L(C.arank)}{R}-{L(C.vrank)}{R}>=SleeperGap,"★","")'
-                     f'&IF({L(C.fits)}{R}," need",""))'),
-            C.drafted: f"=COUNTIF({LOG('G')},{L(C.name)}{R})>0",
+                     f'&IF(AND({L(C.fits)}{R},NOT(AND(HelpG,HelpF,HelpC)))," need",""))'),
+            # Drafted / mine: from the Log (typed picks) or the Draft tab checkboxes.
+            C.drow: f"=IFERROR(MATCH({L(C.name)}{R},{D('C')},0),0)",
+            C.drafted: (f"=OR(COUNTIF({LOG('G')},{L(C.name)}{R})>0,"
+                        f"IF({L(C.drow)}{R}>0,OR(INDEX({D('A')},{L(C.drow)}{R}),INDEX({D('B')},{L(C.drow)}{R})),FALSE))"),
+            C.mine: (f"=OR(COUNTIFS({LOG('G')},{L(C.name)}{R},{LOG('E')},TRUE)>0,"
+                     f"IF({L(C.drow)}{R}>0,INDEX({D('B')},{L(C.drow)}{R}),FALSE))"),
             C.team: row["team"],
             C.games: float(row["games"]),
             C.yrank: float(row["yahoo_rank"]),
@@ -328,6 +343,52 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     pl.cond_formats.append(CondFormat(f"A2:{L(C.width - 1)}{last}", "formula",
                                       f"=${L(C.drafted)}2=TRUE", fg=GRAY, strike=True))
 
+    # ------------------------------------------------------------------ Draft (tap to log)
+    # Every player in a fixed order (Yahoo ADP, then Value); tick Taken or Mine as picks
+    # happen. Rows never re-sort, so a tap always lands on the intended player.
+    nt0 = lg["num_teams"]
+    order = players.assign(_v=players[f"value{nt0}"].astype(float)).sort_values(
+        ["adp", "_v"], ascending=[True, False]).index
+    draft.set("A1", "=Board!A1")
+    # Columns A-C (Taken, Mine, Name) are frozen; merges must stay on one side of that line.
+    draft.merges.append("A1:C1")
+    draft.fmt("A1:C1", bold=True, size=12, align="CENTER", bg="#CFE2F3", wrap=True)
+    draft.cond_formats.append(CondFormat("A1:C1", "formula", '=LEFT($A$1,2)="ON"', bg="#34A853", fg="#FFFFFF"))
+    draft.set("D1", (f'=IF(MyCount<>COUNTIFS({LOG("A")},"<"&CurrentPick,{LOG("E")},TRUE),'
+                     f'"⚠ Mine marked "&MyCount&", you have made "&COUNTIFS({LOG("A")},"<"&CurrentPick,'
+                     f'{LOG("E")},TRUE)&" picks","Pick "&CurrentPick&" — tick Taken / Mine as players go")'))
+    draft.merges.append("D1:L1")
+    draft.fmt("D1:L1", bold=True, italic=True)
+    draft.cond_formats.append(CondFormat("D1:L1", "formula", '=LEFT($D$1,1)="⚠"', bg=BAD))
+    d_hdr = ["Taken", "Mine", "Name", "Pos", "Team", "ADP", "Value", "Fit", "Score", "PAvail", "Best", "★"]
+    draft.put_row(1, 0, d_hdr)
+    _hdr(draft, f"A2:{L(len(d_hdr) - 1)}2")
+    look = {6: C.value, 7: C.fit, 8: C.score, 9: C.pavail, 11: C.star}
+    for i, idx in enumerate(order):
+        r = d_first + i
+        row = players.loc[idx]
+        draft.put_row(r - 1, 0, [False, False, row["name"], row["yahoo_positions"], row["team"],
+                                 round(float(row["adp"]), 1)])
+        for c, pc in look.items():
+            draft.put(r - 1, c, f"=INDEX({P(pc)},MATCH($C{r},{P(C.name)},0))")
+        # Best = rank by Score among players still available (1 = take now).
+        draft.put(r - 1, 10, f'=IF(OR(A{r},B{r}),"",COUNTIFS({P(C.score)},">"&I{r},{P(C.drafted)},FALSE)+1)')
+    draft.validations.append(Validation(f"A{d_first}:B{d_last}", "checkbox"))
+    draft.fmt(f"G{d_first}:I{d_last}", number="0.00")
+    draft.fmt(f"J{d_first}:J{d_last}", number="0%")
+    draft.fmt(f"K{d_first}:K{d_last}", align="CENTER", bold=True)
+    draft.fmt(f"L{d_first}:L{d_last}", fg="#B45F06", bold=True)
+    drng = f"C{d_first}:L{d_last}"
+    draft.cond_formats.append(CondFormat(drng, "formula", f"=$B{d_first}=TRUE", bg=MINE_BG, bold=True))
+    draft.cond_formats.append(CondFormat(drng, "formula", f"=$A{d_first}=TRUE", fg=GRAY, bg=GRAY_BG, strike=True))
+    draft.cond_formats.append(CondFormat(drng, "formula", f"=AND(ISNUMBER($K{d_first}),$K{d_first}<=3)",
+                                         bg="#B7E1CD", bold=True))
+    draft.cond_formats.append(CondFormat(drng, "formula",
+                                         f'=AND(ISNUMBER($J{d_first}),$J{d_first}>{bcfg["can_wait_pavail"]})',
+                                         fg=GRAY))
+    draft.frozen_rows, draft.frozen_cols = 2, 3
+    draft.widths = {0: 50, 1: 45, 2: 170, 3: 45, 4: 45, 5: 45, 6: 50, 7: 50, 8: 50, 9: 50, 10: 40, 11: 50}
+
     # ------------------------------------------------------------------ Board
     board.set("A1", ('=IF(CurrentPick>TotalPicks,"DRAFT COMPLETE",IF(OnClock,"ON THE CLOCK — pick "&CurrentPick,'
                      'IF(MyNextPick=0,"No picks left",(MyNextPick-CurrentPick)&" picks until you  (you pick at "'
@@ -344,14 +405,18 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
                   "Drift", "NextValue", None, None, None, "OnClock"]
     minifs = (f"MINIFS({LOG('A')},{LOG('C')},MySlot,{LOG('F')},TRUE,{LOG('A')},")
     stat_formulas = [
-        f'=COUNTIF({LOG("G")},"?*")+1',
+        f"=COUNTIF({P(C.drafted)},TRUE)+1",
         '=IF(CurrentPick>TotalPicks,"—",ROUNDUP(CurrentPick/NumTeams))',
         f'={minifs}">="&CurrentPick)',
         f'=IF(MyNextPick=0,0,{minifs}">"&MyNextPick))',
         "=IF(OnClock,IF(MyFollowingPick=0,TotalPicks+1,MyFollowingPick),IF(MyNextPick=0,TotalPicks+1,MyNextPick))",
         "=MAX(0,TargetPick-CurrentPick-IF(OnClock,1,0))",
-        (f'=IF(CurrentPick-1<DriftMinPicks,0,IFERROR(MEDIAN(FILTER({LOG("H")},'
-         f'{LOG("A")}>=CurrentPick-DriftWindow,{LOG("A")}<CurrentPick,{LOG("H")}<>"")),0))'),
+        # Typed Log picks have an order: median(pick - opp_rank) over the last DriftWindow.
+        # Checkbox picks don't: compare the median opp_rank of everyone taken with what an
+        # ADP-perfect room would have taken (ranks 1..k -> median (k+1)/2).
+        (f'=IF(CurrentPick-1<DriftMinPicks,0,IF(COUNTIF({LOG("G")},"?*")>=DriftMinPicks,'
+         f'IFERROR(MEDIAN(FILTER({LOG("H")},{LOG("A")}>=CurrentPick-DriftWindow,{LOG("A")}<CurrentPick,'
+         f'{LOG("H")}<>"")),0),IFERROR(CurrentPick/2-MEDIAN(FILTER({P(C.opp)},{P(C.drafted)})),0)))'),
         (f"=IFERROR(LARGE(FILTER({P(C.base)},NOT({P(C.drafted)})),"
          f"MAX(1,TargetPick-CurrentPick+1)),0)"),
         "=NumTeams", "=MySlot", "=TotalPicks",
@@ -413,7 +478,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     my_hdr = ["Player", "Pos", "Team", "Games", "Value"] + [CAT_LABELS[c] for c in CATS]
     my.put_row(2, 0, my_hdr)
     _hdr(my, f"A3:{L(len(my_hdr) - 1)}3")
-    my.set("A4", f'=IFERROR(FILTER({LOG("G")},{LOG("E")},{LOG("G")}<>""),"")')
+    my.set("A4", f'=IFERROR(SORT(FILTER({P(C.name)},{P(C.mine)}),FILTER({P(C.value)},{P(C.mine)}),FALSE),"")')
     lookup_cols = [C.pos, C.team, C.games, C.value] + C.z
     r_first, r_last = 4, 3 + rounds
     for r in range(r_first, r_last + 1):

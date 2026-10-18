@@ -50,6 +50,7 @@ Name fixes: add `data/name_overrides.csv` with columns `source_name,projection_n
 |---|---|
 | **Config** | `NumTeams` (12/13/14 dropdown — switches every value live), `MySlot`, sigma settings, ADP weight, **Punt** checkboxes per category |
 | **Board** | Banner (ON THE CLOCK / N picks until you), CurrentPick, MyNextPick, TargetPick, Drift, NextValue; top 40 available by Score; top 10 by Value |
+| **Draft** | **Fastest way to log picks**: every player in a fixed order (Yahoo ADP), tick **Taken** (another team) or **Mine**. Shows Value / Fit / Score / PAvail and **Best** (rank by Score among available; top 3 green). Warns if the number of Mine ticks doesn't match the picks you've had |
 | **Log** | Pick # 1–196 prefilled; round + snake team computed; **Player** dropdown (type to filter). Rows beyond TotalPicks are grayed and ignored. Your rows highlighted |
 | **Players** | Static projections and z's for every team count + live Value, PAvail, Score, AdjADP, ★ |
 | **My Team** | Your picks with z's, category totals vs. average team, G/F/C fill check, NBA-team concentration |
@@ -122,7 +123,8 @@ PlayerStatistics.csv (not committed).
 ## Draft-day checklist
 
 1. Config: set `NumTeams` and `MySlot` as soon as Yahoo shows the order.
-2. Log each pick as it happens (Log tab, column D — start typing the name).
+2. Log each pick as it happens: tick Taken / Mine on the **Draft** tab (or type it in the Log;
+   a player marked in either place counts once). Use one method per draft so Drift stays meaningful.
 3. Board: take the top Score unless My Team's position check says otherwise.
    After round 2–3, check the Punt Advisor and tick Punt boxes for the leading build.
 4. Keep `out/cheatsheet.pdf` open as a backup.
