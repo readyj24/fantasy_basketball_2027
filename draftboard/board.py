@@ -115,6 +115,8 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
         ("Rounds", rounds, "roster spots"),
         ("DriftWindow", opp["drift_window"], "Drift = median(pick − opp_rank) over this many picks"),
         ("DriftMinPicks", opp["drift_min_picks"], "Drift = 0 until this many picks are logged"),
+        ("NoiseWeighted", bool(cfg.get("noise", {}).get("weighted", True)),
+         "Weight categories by how reliably an edge wins the week (1/noise); untick = plain z"),
         ("SleeperGap", bcfg["sleeper_gap"], "★ when value rank beats ADP rank by this much"),
         ("NeedWeight", bcfg.get("need_weight", 3),
          "Score bonus (z) for filling a G/F/C need, × short ÷ picks left; 0 = off"),
@@ -128,26 +130,36 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
         wb.named[name] = ("Config", a1(i, 1, True))
     config.validations.append(Validation("B2", "list", [str(c) for c in counts]))
     config.validations.append(Validation("B4", "list", [str(s) for s in range(1, max(counts) + 1)]))
+    nw_row = 2 + [r[0] for r in rows].index("NoiseWeighted")
+    config.validations.append(Validation(f"B{nw_row}", "checkbox"))
     config.fmt("B2:B4", bold=True, bg=MINE_BG)
 
     cat_row = len(rows) + 3                       # 0-based header row of the category table
     config.put_row(cat_row - 1, 0, ["Category weights — check 'Punt' to zero a category"])
     config.fmt(f"A{cat_row}", bold=True)
-    config.put_row(cat_row, 0, ["Category", "Punt", "Weight"])
-    _hdr(config, f"A{cat_row + 1}:C{cat_row + 1}")
+    config.put_row(cat_row, 0, ["Category", "Punt", "Weight", "Noise wt"])
+    _hdr(config, f"A{cat_row + 1}:D{cat_row + 1}")
     w_cells = []
     for i, cat in enumerate(CATS):
         r = cat_row + 1 + i
-        config.put_row(r, 0, [CAT_LABELS[cat], False, f"=IF({a1(r, 1)},0,1)"])
+        # Noise weight: 1/sigma, normalised to average 1 (Config "Category noise" table).
+        noise_w = f"=IF(NoiseWeighted,(1/INDEX(CatSigma,1,{i + 1}))/(SUMPRODUCT(1/CatSigma)/{len(CATS)}),1)"
+        config.put_row(r, 0, [CAT_LABELS[cat], False, f"=IF({a1(r, 1)},0,1)*{a1(r, 3)}", noise_w])
         w_cells.append(a1(r, 2))
+    config.fmt(f"C{cat_row + 2}:D{cat_row + 1 + len(CATS)}", number="0.00")
     config.validations.append(
         Validation(f"B{cat_row + 2}:B{cat_row + 1 + len(CATS)}", "checkbox"))
     wrow = cat_row + len(CATS) + 2
     config.put(wrow, 0, "WeightsRow")
     for i, ref in enumerate(w_cells):
         config.put(wrow, 1 + i, f"={ref}")
-    config.put(wrow + 1, 0, "(row form of the weights, used by Players!Value)")
+    config.put(wrow + 1, 0, "NoiseRow")
+    for i in range(len(CATS)):
+        config.put(wrow + 1, 1 + i, f"={a1(cat_row + 1 + i, 3)}")
+    config.put(wrow + 2, 0, "(row forms of the weights: WeightsRow = punt × noise, used by Players!Value)")
     wb.named["WeightsRow"] = ("Config", f"$B${wrow + 1}:${col_letter(len(CATS))}${wrow + 1}")
+    wb.named["NoiseRow"] = ("Config", f"$B${wrow + 2}:${col_letter(len(CATS))}${wrow + 2}")
+    config.fmt(f"B{wrow + 1}:{col_letter(len(CATS))}{wrow + 2}", number="0.00")
 
     # Weekly category noise (z units) used by the Punt Advisor; one row per team count.
     nrow = wrow + 3
@@ -292,7 +304,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
             vals[C.pooln[nt]] = bool(row[f"pool{nt}"])
         vals[C.playoff] = f"={playoff_games(f'{L(C.team)}{R}')}" if sched is not None else ""
         for b in range(len(ADVISOR_BUILDS)):
-            vals[C.build[b]] = f"=SUMPRODUCT({L(C.z[0])}{R}:{L(C.z[-1])}{R},{adv_weights(b)})"
+            vals[C.build[b]] = f"=SUMPRODUCT({L(C.z[0])}{R}:{L(C.z[-1])}{R},{adv_weights(b)},NoiseRow)"
         for c, v in vals.items():
             pl.put(r, c, v)
 
@@ -573,10 +585,18 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
 
     # ------------------------------------------------------------------ Cheatsheet
     nt = lg["num_teams"]
-    cheat.set("A1", f"Juice League cheatsheet — static values for {nt} teams "
+    depth = min(len(players), nt * rounds + 30)
+    # Static cheatsheet uses the same noise weights as the live default (NoiseWeighted on).
+    weighted = bool(noise and nt in noise and cfg.get("noise", {}).get("weighted", True))
+    if weighted:
+        inv = 1 / noise[nt]["sigma"]
+        cheat_w = (inv / inv.mean()).to_dict()
+    else:
+        cheat_w = {c: 1.0 for c in CATS}
+    cheat.set("A1", f"Juice League cheatsheet — static values for {nt} teams"
+                    f"{', noise-weighted' if weighted else ''} "
                     f"(built {pd.Timestamp.now(tz='America/Los_Angeles'):%a %b %d %I:%M%p} PT)")
     cheat.fmt("A1", bold=True, size=12)
-    depth = min(len(players), nt * rounds + 30)
     for b, (label, punts) in enumerate(CHEAT_BUILDS):
         c0 = b * 5
         cheat.put(2, c0, label)
@@ -584,7 +604,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
         cheat.put_row(3, c0, ["#", "Name", "Value", "ADP"])
         _hdr(cheat, f"{L(c0)}4:{L(c0 + 3)}4")
         cats = [c for c in CATS if c not in punts]
-        v = players[[f"z{nt}_{c}" for c in cats]].sum(axis=1)
+        v = sum(players[f"z{nt}_{c}"] * cheat_w[c] for c in cats)
         order = v.sort_values(ascending=False).index[:depth]
         for i, idx in enumerate(order):
             cheat.put_row(4 + i, c0, [i + 1, players.at[idx, "name"], round(float(v[idx]), 2),

@@ -27,6 +27,7 @@ valuation:
   missing_adp: 250
 
 noise:                           # Punt Advisor win probabilities (see valuation.category_noise)
+  weighted: true                 # Value weights categories by 1/noise (Config NoiseWeighted, live)
   weekly_games_per_player: 2.8   # counted games per roster spot per week (10 active slots)
   team_spread_factor: 0.7        # opponent-roster spread vs. random 14-player teams
   phi:                           # fallback model only (used when `measured` is absent);

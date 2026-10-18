@@ -72,6 +72,10 @@ Name fixes: add `data/name_overrides.csv` with columns `source_name,projection_n
   3G/3F/1C). Players who reduce it get `NeedWeight × short ÷ picks left` added to Score
   and show "need" on the Board; once every remaining pick must fill it, everyone else
   drops to the bottom. `NeedWeight` (Config, default 3) = 0 turns it off.
+- **Noise weighting** (Config `NoiseWeighted`, on by default): each category's z is scaled
+  by 1/its weekly noise, normalised to average 1 (STL 0.64 … AST 1.24), because in H2H an
+  edge in a steady category converts into weekly wins more reliably (same idea as
+  Rosenof's G-scores). Untick to get plain z-scores; everything recalculates live.
 - **Score** = Value − PAvail × max(0, Value − NextValue), NextValue = the (TargetPick − CurrentPick + 1)-th
   best available Value. The `max(0, …)` keeps a low-value player who'll still be there
   from being scored above his own value.
