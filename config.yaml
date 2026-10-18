@@ -29,16 +29,28 @@ valuation:
 noise:                           # Punt Advisor win probabilities (see valuation.category_noise)
   weekly_games_per_player: 2.8   # counted games per roster spot per week (10 active slots)
   team_spread_factor: 0.7        # opponent-roster spread vs. random 14-player teams
-  phi:                           # per-game variance / base; scripts/fit_noise.py refits from game logs
-    pts: 2.5
-    reb: 1.2
-    ast: 1.2
-    stl: 1.05
-    blk: 1.3
-    fg3m: 1.3
-    tov: 1.1
-    fg_pct: 1.6                  # > 1: shot-volume and lineup-mix swings on top of make/miss luck
-    ft_pct: 1.4
+  phi:                           # fallback model only (used when `measured` is absent);
+    pts: 3.09                    # fitted from 2025-26 game logs by scripts/fit_noise.py
+    reb: 1.32
+    ast: 1.26
+    stl: 1.07
+    blk: 1.11
+    fg3m: 1.18
+    tov: 1.02
+    fg_pct: 0.91
+    ft_pct: 1.06
+  measured:                     # scripts/measure_week_noise.py (2025-26 game logs)
+    games_per_spot: 2.86
+    weekly_sd:
+      fg_pct: 9.674
+      ft_pct: 4.395
+      fg3m: 11.042
+      pts: 72.624
+      reb: 26.073
+      ast: 19.619
+      stl: 7.208
+      blk: 5.411
+      a_to: 19.172
 
 opponents:
   adp_weight: 0.5                # opp_rank = w * ADP + (1 - w) * Yahoo rank

@@ -20,8 +20,26 @@ from pathlib import Path
 import pandas as pd
 
 
+# Kaggle "Historical NBA Data and Player Box Scores" (PlayerStatistics.csv) column names
+KAGGLE = {"personId": "PLAYER_ID", "numMinutes": "MIN", "points": "PTS", "reboundsTotal": "REB",
+          "assists": "AST", "steals": "STL", "blocks": "BLK", "turnovers": "TOV",
+          "threePointersMade": "FG3M", "fieldGoalsMade": "FGM", "fieldGoalsAttempted": "FGA",
+          "freeThrowsMade": "FTM", "freeThrowsAttempted": "FTA"}
+
+
+def load_kaggle(path: str, season_start: str, season_end: str) -> pd.DataFrame:
+    """One regular season out of the all-history PlayerStatistics.csv."""
+    cols = list(KAGGLE) + ["firstName", "lastName", "gameId", "gameDateTimeEst", "gameType",
+                           "playerteamName"]
+    df = pd.read_csv(path, usecols=cols, low_memory=False)
+    d = pd.to_datetime(df["gameDateTimeEst"], errors="coerce")
+    df = df[(d >= season_start) & (d <= season_end) & (df["gameType"] == "Regular Season")].copy()
+    df["gameDate"] = d[df.index]
+    return df.rename(columns=KAGGLE)
+
+
 def fit(df: pd.DataFrame, min_games: int = 30, min_minutes: float = 20) -> dict[str, float]:
-    df = df.rename(columns=str.upper)
+    df = df.rename(columns=lambda c: c if c in ("gameDate", "firstName", "lastName") else c.upper())
     pid = "PLAYER_ID" if "PLAYER_ID" in df else "PLAYER_NAME"
     df = df[pd.to_numeric(df["MIN"], errors="coerce").fillna(0) > 0]
     g = df.groupby(pid)
@@ -44,8 +62,17 @@ def fit(df: pd.DataFrame, min_games: int = 30, min_minutes: float = 20) -> dict[
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("csv")
+    ap.add_argument("--season", default="2025-10-01:2026-04-30",
+                    help="date range when the file is Kaggle's all-history PlayerStatistics.csv")
     args = ap.parse_args()
-    phi = fit(pd.read_csv(args.csv))
+    head = pd.read_csv(args.csv, nrows=1)
+    if "personId" in head.columns:
+        a, b = args.season.split(":")
+        df = load_kaggle(args.csv, a, b)
+        print(f"{len(df)} player-games {a}..{b}", file=sys.stderr)
+    else:
+        df = pd.read_csv(args.csv)
+    phi = fit(df)
     print("noise:\n  phi:")
     for k, v in phi.items():
         print(f"    {k}: {v:.2f}")

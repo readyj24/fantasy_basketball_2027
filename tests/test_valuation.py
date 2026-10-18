@@ -122,3 +122,14 @@ def test_fit_noise_poisson_and_binomial():
     phi = fit(pd.DataFrame(rows))
     assert phi["stl"] == pytest.approx(1.0, abs=0.15)          # Poisson -> 1
     assert phi["fg_pct"] == pytest.approx(1.0, abs=0.2)        # fixed attempts, binomial -> ~1
+
+
+def test_category_noise_measured_override(synthetic_players):
+    from draftboard.valuation import category_noise
+    vals = value_all(synthetic_players, [12], 14, VCFG)
+    pool = vals[vals["pool12"]]
+    ncfg = {"weekly_games_per_player": 2.8, "team_spread_factor": 0.0, "phi": {},
+            "measured": {"games_per_spot": 2.5, "weekly_sd": {c: 10.0 for c in
+                         ["fg_pct", "ft_pct", "fg3m", "pts", "reb", "ast", "stl", "blk", "a_to"]}}}
+    sig = category_noise(vals, 12, 14, ncfg)
+    assert sig.loc["reb", "sigma"] == pytest.approx(np.sqrt(2) * 10 / (2.5 * pool["reb"].std(ddof=0)))

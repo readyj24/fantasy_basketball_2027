@@ -87,10 +87,15 @@ noisy STL/FG%/FT%/A-T don't), and builds are ranked by **Win week** = P(5+ of 9)
 Punted categories still count — a noisy punt still steals some weeks. A "punt" means
 "stop drafting for it", which can also be a category you've already locked up.
 
-Noise model (`valuation.category_noise`): per-game variance = phi × base (mean for counts,
-att·p(1−p) for FG%/FT%), scaled to weekly team totals, plus opponent-roster spread. `phi`
-defaults are estimates; `python scripts/fit_noise.py gamelogs.csv` refits them from a
-season of player game logs.
+Noise (`valuation.category_noise`): measured from 2025-26 game logs by
+`scripts/measure_week_noise.py` — random 14-man rosters of regulars scored on the real
+weekly schedule (≤10 players counted per day), league-wide light/heavy weeks removed, the
+week-to-week SD of each category converted to z units — plus opponent-roster spread.
+Measured weekly σ (z): REB 5.2, AST 5.1, BLK 5.6, 3PTM 5.9, PTS 6.7, FT% 7.3, A/T 7.5,
+FG% 8.0, STL 10.8. Counting stats are noisier than per-game randomness alone suggests
+(3- vs 4-game weeks, DNPs); FG%/FT% are close to make/miss luck per game
+(`scripts/fit_noise.py`). Data: Kaggle "Historical NBA Data and Player Box Scores"
+PlayerStatistics.csv (not committed).
 
 - Before your 2nd–3rd pick it is mostly noise; let rounds 1–2 be best-available.
 - Commit around round 3–4: tick the matching **Punt** boxes on Config so the Board
