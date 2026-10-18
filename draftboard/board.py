@@ -96,8 +96,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict) -> Wor
         ("DriftWindow", opp["drift_window"], "Drift = median(pick − opp_rank) over this many picks"),
         ("DriftMinPicks", opp["drift_min_picks"], "Drift = 0 until this many picks are logged"),
         ("SleeperGap", bcfg["sleeper_gap"], "★ when value rank beats ADP rank by this much"),
-        ("CanWait", bcfg["can_wait_pavail"], "Board grays rows with PAvail above this"),
-    ]
+            ]
     config.put_row(0, 0, ["Setting", "Value", "Notes"])
     _hdr(config, "A1:C1")
     for i, (name, val, note) in enumerate(rows, start=1):
@@ -268,7 +267,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict) -> Wor
     board.fmt(f"H{first}:P{end}", number="0.0")
     board.fmt(f"G{first}:G{end}", align="CENTER", fg="#B45F06", bold=True)
     board.cond_formats.append(CondFormat(f"A{first}:G{end}", "formula",
-                                         f'=AND(ISNUMBER($F{first}),$F{first}>CanWait)', fg=GRAY, bg=GRAY_BG))
+                                         f'=AND(ISNUMBER($F{first}),$F{first}>{bcfg["can_wait_pavail"]})', fg=GRAY, bg=GRAY_BG))
     board.cond_formats.append(CondFormat(f"H{first}:P{end}", "scale"))
 
     sx = 17                                          # sanity table at column R
