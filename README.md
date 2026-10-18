@@ -76,7 +76,13 @@ Name fixes: add `data/name_overrides.csv` with columns `source_name,projection_n
   by 1/its weekly noise, normalised to average 1 (STL 0.64 … AST 1.24), because in H2H an
   edge in a steady category converts into weekly wins more reliably (same idea as
   Rosenof's G-scores). Untick to get plain z-scores; everything recalculates live.
-- **Score** = Value − PAvail × max(0, Value − NextValue), NextValue = the (TargetPick − CurrentPick + 1)-th
+- **Fit** (H-score-style, linearised): category weights follow your roster. For each
+  category, d P(win)/d z = pdf(edge/σ)/σ on the Punt Advisor's Balanced projection —
+  toss-ups weigh most, locked or hopeless categories fade (so punts emerge on their own).
+  Normalised to average 1, blended in over your first 3 picks (Fit = Value before your
+  first pick). Weights are shown under the Punt Advisor on My Team. With Config
+  `DynamicWeights` on (default), Score is built on Fit; untick to use Value.
+- **Score** = Base − PAvail × max(0, Base − NextValue) (Base = Fit or Value), NextValue = the (TargetPick − CurrentPick + 1)-th
   best available Value. The `max(0, …)` keeps a low-value player who'll still be there
   from being scored above his own value.
 

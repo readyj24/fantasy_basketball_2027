@@ -80,6 +80,7 @@ board:
   sanity_rows: 10
   can_wait_pavail: 0.7
   sleeper_gap: 15                # ★ when value rank beats ADP rank by this much
+  dynamic_weights: true          # Score built on Fit (roster-aware category weights)
   need_weight: 3                 # Score bonus for filling a G/F/C need (scaled by urgency)
   max_players: 400               # rows written to the Players tab
 

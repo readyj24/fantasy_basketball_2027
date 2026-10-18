@@ -41,8 +41,10 @@ class Cols:
     """Players-tab column positions (0-based)."""
 
     def __init__(self, team_counts: list[int]):
-        self.name, self.pos, self.value, self.score, self.adp, self.pavail, self.star = range(7)
-        self.z = list(range(7, 7 + len(CATS)))                 # active z's (Board copies A..P)
+        (self.name, self.pos, self.value, self.score, self.fit, self.adp, self.pavail,
+         self.star) = range(8)
+        self.z = list(range(8, 8 + len(CATS)))                 # active z's (Board copies A..Q)
+        self.board_width = self.z[-1] + 1
         nxt = self.z[-1] + 1
         (self.drafted, self.team, self.games, self.yrank, self.opp, self.adjadp,
          self.vrank, self.arank, self.inpool) = range(nxt, nxt + 9)
@@ -62,7 +64,8 @@ class Cols:
         self.build = list(range(nxt, nxt + len(ADVISOR_BUILDS)))  # value under each advisor build
         nxt += len(ADVISOR_BUILDS)
         self.fits = nxt                                        # fills a G/F/C need on my roster
-        self.width = nxt + 1
+        self.base = nxt + 1                                    # Fit or Value, per DynamicWeights
+        self.width = nxt + 2
 
 
 def _hdr(sheet: Sheet, rng: str) -> None:
@@ -117,6 +120,8 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
         ("DriftMinPicks", opp["drift_min_picks"], "Drift = 0 until this many picks are logged"),
         ("NoiseWeighted", bool(cfg.get("noise", {}).get("weighted", True)),
          "Weight categories by how reliably an edge wins the week (1/noise); untick = plain z"),
+        ("DynamicWeights", bool(bcfg.get("dynamic_weights", True)),
+         "Score uses Fit (category weights follow your roster: toss-up cats count most); untick = Value"),
         ("SleeperGap", bcfg["sleeper_gap"], "★ when value rank beats ADP rank by this much"),
         ("NeedWeight", bcfg.get("need_weight", 3),
          "Score bonus (z) for filling a G/F/C need, × short ÷ picks left; 0 = off"),
@@ -132,6 +137,8 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     config.validations.append(Validation("B4", "list", [str(s) for s in range(1, max(counts) + 1)]))
     nw_row = 2 + [r[0] for r in rows].index("NoiseWeighted")
     config.validations.append(Validation(f"B{nw_row}", "checkbox"))
+    dw_row = 2 + [r[0] for r in rows].index("DynamicWeights")
+    config.validations.append(Validation(f"B{dw_row}", "checkbox"))
     config.fmt("B2:B4", bold=True, bg=MINE_BG)
 
     cat_row = len(rows) + 3                       # 0-based header row of the category table
@@ -235,7 +242,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     # ------------------------------------------------------------------ Players
     zlabels = [f"z {CAT_LABELS[c]}" for c in CATS]
     header = [""] * C.width
-    header[C.name:C.star + 1] = ["Name", "Pos", "Value", "Score", "ADP", "PAvail", "★"]
+    header[C.name:C.star + 1] = ["Name", "Pos", "Value", "Score", "Fit", "ADP", "PAvail", "★"]
     for i, c in enumerate(C.z):
         header[c] = zlabels[i]
     header[C.drafted:C.inpool + 1] = ["Drafted", "Team", "Games", "Yahoo rank", "Opp rank",
@@ -248,6 +255,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
         header[C.pooln[nt]] = f"pool{nt}"
     header[C.playoff] = "Playoff G"
     header[C.fits] = "Fills need"
+    header[C.base] = "Score base"
     for b, (label, _) in enumerate(ADVISOR_BUILDS):
         header[C.build[b]] = f"Value: {label}"
     pl.put_row(0, 0, header)
@@ -272,7 +280,9 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
             C.value: f"=SUMPRODUCT({L(C.z[0])}{R}:{L(C.z[-1])}{R},WeightsRow)",
             # Position need: bonus scaled by urgency (short / picks left); once every remaining
             # pick must fill a need, players who don't are pushed to the bottom (-100).
-            C.score: (f"={L(C.value)}{R}-{L(C.pavail)}{R}*MAX(0,{L(C.value)}{R}-NextValue)"
+            C.fit: f"=SUMPRODUCT({L(C.z[0])}{R}:{L(C.z[-1])}{R},DynRow)",
+            C.base: f"=IF(DynamicWeights,{L(C.fit)}{R},{L(C.value)}{R})",
+            C.score: (f"={L(C.base)}{R}-{L(C.pavail)}{R}*MAX(0,{L(C.base)}{R}-NextValue)"
                       f"+IF({L(C.fits)}{R},NeedWeight*MIN(1,ShortMax/MAX(1,PicksLeft)),0)"
                       f"-IF(AND(PicksLeft>0,ShortMax>=PicksLeft,NOT({L(C.fits)}{R})),100,0)"),
             C.fits: (f'=AND(ShortMax>0,OR(AND(HelpG,ISNUMBER(SEARCH("G",{L(C.pos)}{R}))),'
@@ -310,7 +320,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
 
     pl.frozen_rows, pl.frozen_cols = 1, 1
     pl.widths = {C.name: 180, C.pos: 50}
-    pl.fmt(f"{L(C.value)}2:{L(C.score)}{last}", number="0.00")
+    pl.fmt(f"{L(C.value)}2:{L(C.fit)}{last}", number="0.00")
     pl.fmt(f"{L(C.pavail)}2:{L(C.pavail)}{last}", number="0%")
     pl.fmt(f"{L(C.z[0])}2:{L(C.z[-1])}{last}", number="0.00")
     pl.fmt(f"{L(C.opp)}2:{L(C.adjadp)}{last}", number="0.0")
@@ -322,10 +332,11 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     board.set("A1", ('=IF(CurrentPick>TotalPicks,"DRAFT COMPLETE",IF(OnClock,"ON THE CLOCK — pick "&CurrentPick,'
                      'IF(MyNextPick=0,"No picks left",(MyNextPick-CurrentPick)&" picks until you  (you pick at "'
                      '&MyNextPick&", round "&ROUNDUP(MyNextPick/NumTeams)&")")))'))
-    board.merges.append("A1:P1")
-    board.fmt("A1:P1", bold=True, size=20, align="CENTER", bg="#CFE2F3")
-    board.cond_formats.append(CondFormat("A1:P1", "formula", '=LEFT($A$1,2)="ON"', bg="#34A853", fg="#FFFFFF"))
-    board.cond_formats.append(CondFormat("A1:P1", "formula", '=LEFT($A$1,5)="DRAFT"', bg="#666666", fg="#FFFFFF"))
+    BW = L(C.board_width - 1)                       # last Board main-table column (Q)
+    board.merges.append(f"A1:{BW}1")
+    board.fmt(f"A1:{BW}1", bold=True, size=20, align="CENTER", bg="#CFE2F3")
+    board.cond_formats.append(CondFormat(f"A1:{BW}1", "formula", '=LEFT($A$1,2)="ON"', bg="#34A853", fg="#FFFFFF"))
+    board.cond_formats.append(CondFormat(f"A1:{BW}1", "formula", '=LEFT($A$1,5)="DRAFT"', bg="#666666", fg="#FFFFFF"))
 
     stat_labels = ["Current pick", "Round", "My next pick", "My following", "Target pick",
                    "Opp picks until", "Drift", "NextValue", "Teams", "My slot", "Total picks", "On clock"]
@@ -341,7 +352,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
         "=MAX(0,TargetPick-CurrentPick-IF(OnClock,1,0))",
         (f'=IF(CurrentPick-1<DriftMinPicks,0,IFERROR(MEDIAN(FILTER({LOG("H")},'
          f'{LOG("A")}>=CurrentPick-DriftWindow,{LOG("A")}<CurrentPick,{LOG("H")}<>"")),0))'),
-        (f"=IFERROR(LARGE(FILTER({P(C.value)},NOT({P(C.drafted)})),"
+        (f"=IFERROR(LARGE(FILTER({P(C.base)},NOT({P(C.drafted)})),"
          f"MAX(1,TargetPick-CurrentPick+1)),0)"),
         "=NumTeams", "=MySlot", "=TotalPicks",
         "=AND(CurrentPick<=TotalPicks,CurrentPick=MyNextPick)",
@@ -355,38 +366,44 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     board.fmt("A3:L3", bold=True, size=13, align="CENTER")
     board.fmt("G3:H3", number="0.00")
 
-    main_hdr = ["Name", "Pos", "Value", "Score", "ADP", "PAvail", "★"] + [CAT_LABELS[c] for c in CATS]
+    main_hdr = ["Name", "Pos", "Value", "Score", "Fit", "ADP", "PAvail", "★"] + [CAT_LABELS[c] for c in CATS]
+    bw = C.board_width
     top = 4                                         # 0-based header row of the main table
-    board.put(top - 1, 0, "Best pick now (sorted by Score)  —  gray = likely still there next time")
+    board.put(top - 1, 0, ("Best pick now (sorted by Score = Fit or Value, adjusted for who'll still be "
+                           "there)  —  gray = likely still there next time"))
     board.fmt(f"A{top}", bold=True, italic=True)
     board.put_row(top, 0, main_hdr)
-    _hdr(board, f"A{top + 1}:P{top + 1}")
+    _hdr(board, f"A{top + 1}:{BW}{top + 1}")
     main_rows = bcfg["main_rows"]
     first, end = top + 2, top + 1 + main_rows       # 1-based data rows
-    board.put(top + 1, 0, (f'=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER(Players!$A$2:$P${last},'
-                           f'NOT({P(C.drafted)})),4,FALSE),{main_rows},16),"")'))
-    board.fmt(f"C{first}:D{end}", number="0.00")
-    board.fmt(f"E{first}:E{end}", number="0.0")
-    board.fmt(f"F{first}:F{end}", number="0%")
-    board.fmt(f"H{first}:P{end}", number="0.0")
-    board.fmt(f"G{first}:G{end}", align="CENTER", fg="#B45F06", bold=True)
-    board.cond_formats.append(CondFormat(f"A{first}:G{end}", "formula",
-                                         f'=AND(ISNUMBER($F{first}),$F{first}>{bcfg["can_wait_pavail"]})', fg=GRAY, bg=GRAY_BG))
-    board.cond_formats.append(CondFormat(f"H{first}:P{end}", "scale"))
+    board.put(top + 1, 0, (f'=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER(Players!$A$2:${BW}${last},'
+                           f'NOT({P(C.drafted)})),{C.score + 1},FALSE),{main_rows},{bw}),"")'))
+    zf, zl, pa = L(C.z[0]), L(C.z[-1]), L(C.pavail)
+    board.fmt(f"{L(C.value)}{first}:{L(C.fit)}{end}", number="0.00")
+    board.fmt(f"{L(C.fit)}{first}:{L(C.fit)}{end}", number="0.00", bold=True)
+    board.fmt(f"{L(C.adp)}{first}:{L(C.adp)}{end}", number="0.0")
+    board.fmt(f"{pa}{first}:{pa}{end}", number="0%")
+    board.fmt(f"{zf}{first}:{zl}{end}", number="0.0")
+    board.fmt(f"{L(C.star)}{first}:{L(C.star)}{end}", align="CENTER", fg="#B45F06", bold=True)
+    board.cond_formats.append(CondFormat(f"A{first}:{L(C.star)}{end}", "formula",
+                                         f'=AND(ISNUMBER(${pa}{first}),${pa}{first}>{bcfg["can_wait_pavail"]})',
+                                         fg=GRAY, bg=GRAY_BG))
+    board.cond_formats.append(CondFormat(f"{zf}{first}:{zl}{end}", "scale"))
 
-    sx = 17                                          # sanity table at column R
+    sx = bw + 1                                      # sanity table after a spacer column
     board.put(top - 1, sx, "Top 10 available by Value (sanity check)")
     board.fmt(f"{L(sx)}{top}", bold=True, italic=True)
-    board.put_row(top, sx, ["Name", "Pos", "Value", "Score", "ADP", "PAvail"])
-    _hdr(board, f"{L(sx)}{top + 1}:{L(sx + 5)}{top + 1}")
-    board.put(top + 1, sx, (f'=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER(Players!$A$2:$F${last},'
-                            f'NOT({P(C.drafted)})),3,FALSE),{bcfg["sanity_rows"]},6),"")'))
+    board.put_row(top, sx, ["Name", "Pos", "Value", "Score", "Fit", "ADP", "PAvail"])
+    _hdr(board, f"{L(sx)}{top + 1}:{L(sx + 6)}{top + 1}")
+    board.put(top + 1, sx, (f'=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER(Players!$A$2:${L(C.pavail)}${last},'
+                            f'NOT({P(C.drafted)})),{C.value + 1},FALSE),{bcfg["sanity_rows"]},{C.pavail + 1}),"")'))
     send = top + 1 + bcfg["sanity_rows"]
-    board.fmt(f"{L(sx + 2)}{first}:{L(sx + 3)}{send}", number="0.00")
-    board.fmt(f"{L(sx + 4)}{first}:{L(sx + 4)}{send}", number="0.0")
-    board.fmt(f"{L(sx + 5)}{first}:{L(sx + 5)}{send}", number="0%")
-    board.widths = {0: 170, 1: 45, 2: 55, 3: 55, 4: 50, 5: 55, 6: 25, sx: 170, sx + 1: 45, 16: 20}
-    for c in range(7, 16):
+    board.fmt(f"{L(sx + 2)}{first}:{L(sx + 4)}{send}", number="0.00")
+    board.fmt(f"{L(sx + 5)}{first}:{L(sx + 5)}{send}", number="0.0")
+    board.fmt(f"{L(sx + 6)}{first}:{L(sx + 6)}{send}", number="0%")
+    board.widths = {0: 170, 1: 45, C.value: 55, C.score: 55, C.fit: 55, C.adp: 50, C.pavail: 55,
+                    C.star: 25, sx: 170, sx + 1: 45, bw: 20}
+    for c in C.z:
         board.widths[c] = 44
     board.frozen_rows = 3
 
@@ -560,6 +577,34 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     my.set(f"{L(a0 + 1)}{rec_r}", (f"=INDEX({L(a0)}{b_first}:{L(a0)}{b_last},"
                                    f"MATCH(MAX({key}{b_first}:{key}{b_last}),{key}{b_first}:{key}{b_last},0))"))
     my.fmt(f"{L(a0)}{rec_r}:{L(a0 + 4)}{rec_r}", bold=True, size=12)
+
+    # Fit weights (H-score-style, linearised): d P(win cat) / d z = pdf(edge/sigma)/sigma on the
+    # Balanced projection -> toss-up categories weigh most, locked/lost ones fade. Normalised
+    # to average 1 over counted categories and blended in over the first 3 picks.
+    dr = rec_r + 2
+    my.set(f"{L(a0)}{dr}", "Fit weights — how much each category matters for YOUR roster right now")
+    my.fmt(f"{L(a0)}{dr}", bold=True, size=12)
+    my.put_row(dr, a0, ["Category"] + [CAT_LABELS[c] for c in CATS])
+    _hdr(my, f"{L(a0)}{dr + 1}:{L(a0 + nc)}{dr + 1}")
+    raw_r, dyn_r, fin_r = dr + 2, dr + 3, dr + 4
+    my.set(f"{L(a0)}{raw_r}", "Marginal win value")
+    my.set(f"{L(a0)}{dyn_r}", "Roster-aware weight")
+    my.set(f"{L(a0)}{fin_r}", "Fit weight (used)")
+    raw_rng = f"${L(a0 + 1)}${raw_r}:${L(a0 + nc)}${raw_r}"
+    for k in range(nc):
+        colL = L(a0 + 1 + k)
+        edge = f"{L(proj0 + k)}{b_first}"                     # Balanced build's projected edge
+        sig = f"INDEX(CatSigma,1,{k + 1})"
+        my.set(f"{colL}{raw_r}", f"=IF(INDEX(WeightsRow,1,{k + 1})=0,0,NORM.DIST({edge}/{sig},0,1,FALSE)/{sig})")
+        my.set(f"{colL}{dyn_r}", f'={colL}{raw_r}/(SUM({raw_rng})/MAX(1,COUNTIF({raw_rng},">0")))')
+        my.set(f"{colL}{fin_r}", (f"=(1-MIN(1,MyCount/3))*INDEX(WeightsRow,1,{k + 1})"
+                                  f"+MIN(1,MyCount/3)*{colL}{dyn_r}"))
+    wb.named["DynRow"] = ("My Team", f"${L(a0 + 1)}${fin_r}:${L(a0 + nc)}${fin_r}")
+    my.fmt(f"{L(a0 + 1)}{raw_r}:{L(a0 + nc)}{fin_r}", number="0.00")
+    my.fmt(f"{L(a0)}{fin_r}:{L(a0 + nc)}{fin_r}", bold=True)
+    my.cond_formats.append(CondFormat(f"{L(a0 + 1)}{fin_r}:{L(a0 + nc)}{fin_r}", "scale",
+                                      min_color="#F4CCCC", mid_color="#FFFFFF", max_color="#B7E1CD",
+                                      mid_value=1))
     my.cond_formats.append(CondFormat(f"{L(a0)}{b_first}:{L(a0)}{b_last}", "formula",
                                       f"=${key}{b_first}=MAX(${key}${b_first}:${key}${b_last})",
                                       bg=GOOD, bold=True))

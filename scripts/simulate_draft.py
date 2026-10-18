@@ -71,7 +71,7 @@ class Board:
         return [dict(zip(hdr, r + [""] * (len(hdr) - len(r)))) for r in rows[1:] if r and r[0]]
 
     def state(self) -> dict:
-        res = self.ss.values_batch_get(["Board!A1:L3", "Board!A6:P45", "Board!R6:W15"],
+        res = self.ss.values_batch_get(["Board!A1:L3", "Board!A6:Q45", "Board!S6:Y15"],
                                        params={"valueRenderOption": UNF})["valueRanges"]
         hdr, table, sanity = (vr.get("values", []) for vr in res)
         labels = hdr[1]
@@ -134,7 +134,7 @@ def run_scenario(b: Board, n: int, slot: int, rounds: int, seed: int) -> dict[st
                   f"pick {pick}: sanity table wrong")
             choice = names[0]
             print(f"    pick {pick:3d} (rd {st['Round']}): {choice:26} Value {value[choice]:5.2f}  "
-                  f"Score {st['table'][0][3]:5.2f}  PAvail {st['table'][0][5]:.0%}  "
+                  f"Score {st['table'][0][3]:5.2f}  Fit {st['table'][0][4]:5.2f}  PAvail {st['table'][0][6]:.0%}  "
                   f"opp picks until next {st['Opp picks until']}  Drift {st['Drift']:+.1f}")
             b.write_picks(pick, [choice])
             drafted.append(choice)
