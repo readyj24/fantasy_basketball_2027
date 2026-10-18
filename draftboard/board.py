@@ -60,7 +60,9 @@ class Cols:
         self.playoff = nxt                                     # playoff-week games (Schedule tab)
         nxt += 1
         self.build = list(range(nxt, nxt + len(ADVISOR_BUILDS)))  # value under each advisor build
-        self.width = nxt + len(ADVISOR_BUILDS)
+        nxt += len(ADVISOR_BUILDS)
+        self.fits = nxt                                        # fills a G/F/C need on my roster
+        self.width = nxt + 1
 
 
 def _hdr(sheet: Sheet, rng: str) -> None:
@@ -112,6 +114,8 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
         ("DriftWindow", opp["drift_window"], "Drift = median(pick − opp_rank) over this many picks"),
         ("DriftMinPicks", opp["drift_min_picks"], "Drift = 0 until this many picks are logged"),
         ("SleeperGap", bcfg["sleeper_gap"], "★ when value rank beats ADP rank by this much"),
+        ("NeedWeight", bcfg.get("need_weight", 3),
+         "Score bonus (z) for filling a G/F/C need, × short ÷ picks left; 0 = off"),
         ("PlayoffStart", lg["playoff_weeks"][0], "first fantasy playoff week (Yahoo week #)"),
         ("PlayoffEnd", lg["playoff_weeks"][-1], "last fantasy playoff week"),
             ]
@@ -208,6 +212,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
             header[c] = f"z{nt} {CAT_LABELS[CATS[i]]}"
         header[C.pooln[nt]] = f"pool{nt}"
     header[C.playoff] = "Playoff G"
+    header[C.fits] = "Fills need"
     for b, (label, _) in enumerate(ADVISOR_BUILDS):
         header[C.build[b]] = f"Value: {label}"
     pl.put_row(0, 0, header)
@@ -230,11 +235,19 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
             C.name: row["name"],
             C.pos: row["yahoo_positions"],
             C.value: f"=SUMPRODUCT({L(C.z[0])}{R}:{L(C.z[-1])}{R},WeightsRow)",
-            C.score: f"={L(C.value)}{R}-{L(C.pavail)}{R}*MAX(0,{L(C.value)}{R}-NextValue)",
+            # Position need: bonus scaled by urgency (short / picks left); once every remaining
+            # pick must fill a need, players who don't are pushed to the bottom (-100).
+            C.score: (f"={L(C.value)}{R}-{L(C.pavail)}{R}*MAX(0,{L(C.value)}{R}-NextValue)"
+                      f"+IF({L(C.fits)}{R},NeedWeight*MIN(1,ShortMax/MAX(1,PicksLeft)),0)"
+                      f"-IF(AND(PicksLeft>0,ShortMax>=PicksLeft,NOT({L(C.fits)}{R})),100,0)"),
+            C.fits: (f'=AND(ShortMax>0,OR(AND(HelpG,ISNUMBER(SEARCH("G",{L(C.pos)}{R}))),'
+                     f'AND(HelpF,ISNUMBER(SEARCH("F",{L(C.pos)}{R}))),'
+                     f'AND(HelpC,ISNUMBER(SEARCH("C",{L(C.pos)}{R})))))'),
             C.adp: float(row["adp"]),
             C.pavail: (f"=IF({L(C.drafted)}{R},0,1-NORM.DIST(TargetPick,{L(C.adjadp)}{R},"
                        f"MAX(SigmaMin,SigmaMult*{L(C.opp)}{R}),TRUE))"),
-            C.star: f'=IF({L(C.arank)}{R}-{L(C.vrank)}{R}>=SleeperGap,"★","")',
+            C.star: (f'=TRIM(IF({L(C.arank)}{R}-{L(C.vrank)}{R}>=SleeperGap,"★","")'
+                     f'&IF({L(C.fits)}{R}," need",""))'),
             C.drafted: f"=COUNTIF({LOG('G')},{L(C.name)}{R})>0",
             C.team: row["team"],
             C.games: float(row["games"]),
@@ -419,6 +432,20 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     sr = s_last + 1
     my.set(f"A{sr}", "Picks left")
     my.set(f"B{sr}", "=Rounds-MyCount")
+    wb.named["PicksLeft"] = ("My Team", f"$B${sr}")
+    # Which positions reduce the binding (largest) shortfall -> Players "Fills need" / Board "need".
+    my.put_row(pr, 6, ["Position", "Fills need?"])
+    _hdr(my, f"G{pr + 1}:H{pr + 1}")
+    d_rng, a_rng = f"$D${s_first}:$D${s_last}", f"$A${s_first}:$A${s_last}"
+    for i, pos in enumerate("GFC"):
+        r = s_first + i
+        my.set(f"G{r}", pos)
+        my.set(f"H{r}", f'=SUMPRODUCT(({d_rng}=ShortMax)*({d_rng}>0)*ISNUMBER(SEARCH("{pos}",{a_rng})))>0')
+        wb.named[f"Help{pos}"] = ("My Team", f"$H${r}")
+    my.set(f"G{s_first + 4}", "Short (max)")
+    my.set(f"H{s_first + 4}", f"=MAX({d_rng})")
+    wb.named["ShortMax"] = ("My Team", f"$H${s_first + 4}")
+    my.cond_formats.append(CondFormat(f"H{s_first}:H{s_first + 2}", "formula", f"=H{s_first}=TRUE", bg=BAD, bold=True))
     my.set(f"A{sr + 1}", "Status")
     my.set(f"B{sr + 1}", (f'=IF({short}>B{sr},"⚠ CAN\'T fill 3G/3F/1C — short by "&{short}&" with "&B{sr}&" picks left",'
                           f'IF({short}=0,"OK — 3G/3F/1C covered",'

@@ -68,6 +68,10 @@ Name fixes: add `data/name_overrides.csv` with columns `source_name,projection_n
   different rankings. All three knobs are in `config.yaml`.
 - **opp_rank** = w × ADP + (1 − w) × Yahoo rank. **AdjADP** = max(opp_rank + Drift, CurrentPick).
 - **PAvail** = 1 − NORM.DIST(TargetPick, AdjADP, max(SigmaMin, SigmaMult × opp_rank)).
+- **Position need**: My Team computes the binding G/F/C shortfall (Hall's condition over
+  3G/3F/1C). Players who reduce it get `NeedWeight × short ÷ picks left` added to Score
+  and show "need" on the Board; once every remaining pick must fill it, everyone else
+  drops to the bottom. `NeedWeight` (Config, default 3) = 0 turns it off.
 - **Score** = Value − PAvail × max(0, Value − NextValue), NextValue = the (TargetPick − CurrentPick + 1)-th
   best available Value. The `max(0, …)` keeps a low-value player who'll still be there
   from being scored above his own value.

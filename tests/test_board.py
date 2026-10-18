@@ -7,7 +7,7 @@ from draftboard.board import build_workbook
 from draftboard.valuation import display_stats, value_all
 
 FUNCS = {
-    "AND", "ARRAY_CONSTRAIN", "ROWS", "SEQUENCE", "COUNTIFS", "CHOOSE", "COUNTIF", "FALSE", "FILTER", "IF", "IFERROR", "INDEX",
+    "AND", "ARRAY_CONSTRAIN", "ROWS", "SEQUENCE", "COUNTIFS", "MIN", "OR", "TRIM", "CHOOSE", "COUNTIF", "FALSE", "FILTER", "IF", "IFERROR", "INDEX",
     "ISNUMBER", "ISODD", "LARGE", "LEFT", "MATCH", "MAX", "MEDIAN", "MINIFS", "MOD", "NORM",
     "DIST", "NOT", "RANK", "ROUNDUP", "SEARCH", "SORT", "SUM", "SUMPRODUCT", "TEXTJOIN", "TRUE",
     "UNIQUE", "Log", "Players", "Config", "Board",

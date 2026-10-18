@@ -126,7 +126,9 @@ def run_scenario(b: Board, n: int, slot: int, rounds: int, seed: int) -> dict[st
             check(not leaked, f"pick {pick}: drafted players on Board {sorted(leaked)[:5]}")
             check(len(names) == min(40, len(opp_rank) - len(drafted)), f"pick {pick}: table has {len(names)} rows")
             scores = [r[3] for r in st["table"]]
-            check(scores == sorted(scores, reverse=True), f"pick {pick}: Board not sorted by Score")
+            bad = [(names[i], scores[i], names[i + 1], scores[i + 1]) for i in range(len(scores) - 1)
+                   if not scores[i] >= scores[i + 1] - 1e-9]
+            check(not bad, f"pick {pick}: Board not sorted by Score: {bad[:3]}")
             sv = [r[2] for r in st["sanity"]]
             check(sv == sorted(sv, reverse=True) and not set(r[0] for r in st["sanity"]) & set(drafted),
                   f"pick {pick}: sanity table wrong")
@@ -182,6 +184,8 @@ def run_scenario(b: Board, n: int, slot: int, rounds: int, seed: int) -> dict[st
     for r in status:
         if r and r[0] in ("Status", "Picks left"):
             print(f"    My Team {r[0]}: {r[1] if len(r) > 1 else ''}")
+            if r[0] == "Status":
+                check(not str(r[1]).startswith("⚠ CAN"), f"roster can't fill starting slots: {r[1]}")
     print(f"    my team: {', '.join(mine)}")
     return value
 
