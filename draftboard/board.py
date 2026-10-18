@@ -19,6 +19,16 @@ MINE_BG = "#FFF2CC"
 GOOD = "#D9EAD3"
 BAD = "#F4CCCC"
 
+# Punt Advisor builds: label -> categories punted (weight 0).
+ADVISOR_BUILDS = [
+    ("Balanced", []),
+    ("Punt FT%", ["ft_pct"]),
+    ("Punt FG%", ["fg_pct"]),
+    ("Punt AST + A/T", ["ast", "a_to"]),
+    ("Punt BLK", ["blk"]),
+    ("Punt 3PTM", ["fg3m"]),
+]
+
 CHEAT_BUILDS = [
     ("Balanced", []),
     ("Punt FT%", ["ft_pct"]),
@@ -48,7 +58,9 @@ class Cols:
             self.pooln[n] = nxt
             nxt += 1
         self.playoff = nxt                                     # playoff-week games (Schedule tab)
-        self.width = nxt + 1
+        nxt += 1
+        self.build = list(range(nxt, nxt + len(ADVISOR_BUILDS)))  # value under each advisor build
+        self.width = nxt + len(ADVISOR_BUILDS)
 
 
 def _hdr(sheet: Sheet, rng: str) -> None:
@@ -196,10 +208,20 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
             header[c] = f"z{nt} {CAT_LABELS[CATS[i]]}"
         header[C.pooln[nt]] = f"pool{nt}"
     header[C.playoff] = "Playoff G"
+    for b, (label, _) in enumerate(ADVISOR_BUILDS):
+        header[C.build[b]] = f"Value: {label}"
     pl.put_row(0, 0, header)
     _hdr(pl, f"A1:{col_letter(C.width - 1)}1")
 
     L = col_letter
+    # Punt Advisor grid on My Team: build labels in column ADV_C0, weights in the next 9 columns.
+    ADV_C0, ADV_R0 = 20, 5                         # column U, first build on row 6 (1-based)
+    adv_w_first, adv_w_last = L(ADV_C0 + 1), L(ADV_C0 + len(CATS))
+
+    def adv_weights(b: int) -> str:
+        r = ADV_R0 + 1 + b
+        return f"'My Team'!${adv_w_first}${r}:${adv_w_last}${r}"
+
     for i, row in players.reset_index(drop=True).iterrows():
         r = i + 1
         R = r + 1
@@ -233,6 +255,8 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
         for nt in counts:
             vals[C.pooln[nt]] = bool(row[f"pool{nt}"])
         vals[C.playoff] = f"={playoff_games(f'{L(C.team)}{R}')}" if sched is not None else ""
+        for b in range(len(ADVISOR_BUILDS)):
+            vals[C.build[b]] = f"=SUMPRODUCT({L(C.z[0])}{R}:{L(C.z[-1])}{R},{adv_weights(b)})"
         for c, v in vals.items():
             pl.put(r, c, v)
 
@@ -415,7 +439,77 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
         my.set(f"B{r}", f'=IF(A{r}="","",COUNTIF($C${r_first}:$C${r_last},A{r}))')
     my.cond_formats.append(CondFormat(f"A{tr2 + 2}:B{tr2 + 1 + rounds}", "formula",
                                       f'=AND(ISNUMBER($B{tr2 + 2}),$B{tr2 + 2}>=3)', bg=BAD, bold=True))
-    my.widths = {0: 190, 1: 60, 2: 90, 3: 60}
+    # Punt Advisor: project end-of-draft category totals per build and count wins.
+    #   projected(cat) = my total now
+    #                  + for each of my remaining picks p: the z of the available player ranked
+    #                    (p - CurrentPick + 1) by that build's value (what the build lands there)
+    #                  - the average team's full roster
+    a0 = ADV_C0
+    my.set(f"{L(a0)}2", "Punt Advisor — projected categories won vs. an average team (need 5 of 9)")
+    my.fmt(f"{L(a0)}2", bold=True, size=12)
+    my.put(3, a0, ("Weights (1 = counts, 0 = punted). Projection = your z's now + for each of your "
+                   "remaining picks, the ~5 available players at that depth when sorted by the build's value, "
+                   "minus the average team's full roster. Check the matching Punt boxes on Config "
+                   "to re-sort the Board."))
+    my.fmt(f"{L(a0)}4", italic=True, fg="#666666")
+    hdr_r = ADV_R0                                   # 1-based header row
+    my.put_row(hdr_r - 1, a0, ["Build"] + [CAT_LABELS[c] for c in CATS])
+    proj0 = a0 + len(CATS) + 2                       # projected diffs grid starts here
+    my.put_row(hdr_r - 1, proj0, [f"Proj {CAT_LABELS[c]}" for c in CATS]
+               + ["Cats won", "Cats counted", "Margin", "Rank key"])
+    _hdr(my, f"{L(a0)}{hdr_r}:{L(proj0 + len(CATS) + 3)}{hdr_r}")
+    # Hidden helper: offsets of my remaining picks from the current pick (1 = on the clock).
+    off_c = proj0 + len(CATS) + 4
+    my.put(hdr_r - 1, off_c, "Pick offsets")
+    my.put(hdr_r, off_c, (f'=IFERROR(FILTER({LOG("A")}-CurrentPick+1,{LOG("E")},'
+                          f'{LOG("A")}>=CurrentPick),"")'))
+    offs = f"${L(off_c)}${hdr_r + 1}:${L(off_c)}${hdr_r + rounds}"
+    my.hidden_cols.append(off_c)
+    n_b = len(ADVISOR_BUILDS)
+    for b, (label, punts) in enumerate(ADVISOR_BUILDS):
+        r = hdr_r + 1 + b
+        my.put(r - 1, a0, label)
+        for k, cat in enumerate(CATS):
+            my.put(r - 1, a0 + 1 + k, 0 if cat in punts else 1)
+            me_now = f"${L(5 + k)}${tr}"
+            zc, bv, dr = P(C.z[k]), P(C.build[b]), P(C.drafted)
+            srt = f"SORT(FILTER({zc},NOT({dr})),FILTER({bv},NOT({dr})),FALSE)"
+            # Each pick = mean of the 5 players around its depth (smooths one-player quirks).
+            seq = f"SEQUENCE(ROWS({srt}))"
+            future = (f'IFERROR(SUMPRODUCT({srt},COUNTIFS({offs},">="&({seq}-2),{offs},"<="&({seq}+2)))/5,0)')
+            avg_full = f"SUMPRODUCT({zc}*({P(C.inpool)}=TRUE))/NumTeams"
+            my.put(r - 1, proj0 + k, f"={me_now}+{future}-{avg_full}")
+        w_rng = f"{L(a0 + 1)}{r}:{L(a0 + len(CATS))}{r}"
+        p_rng = f"{L(proj0)}{r}:{L(proj0 + len(CATS) - 1)}{r}"
+        my.put(r - 1, proj0 + len(CATS), f"=SUMPRODUCT(({p_rng}>0)*{w_rng})")
+        my.put(r - 1, proj0 + len(CATS) + 1, f"=SUM({w_rng})")
+        my.put(r - 1, proj0 + len(CATS) + 2, f"=SUMPRODUCT({p_rng}*{w_rng})")
+        won, mg = L(proj0 + len(CATS)), L(proj0 + len(CATS) + 2)
+        my.put(r - 1, proj0 + len(CATS) + 3, f"={won}{r}+{mg}{r}/1000")
+    b_first, b_last = hdr_r + 1, hdr_r + n_b
+    key = L(proj0 + len(CATS) + 3)
+    rec_r = b_last + 2
+    my.set(f"{L(a0)}{rec_r}", "Best fit now:")
+    my.set(f"{L(a0 + 1)}{rec_r}", (f"=INDEX({L(a0)}{b_first}:{L(a0)}{b_last},"
+                                   f"MATCH(MAX({key}{b_first}:{key}{b_last}),{key}{b_first}:{key}{b_last},0))"))
+    my.fmt(f"{L(a0)}{rec_r}:{L(a0 + 4)}{rec_r}", bold=True, size=12)
+    my.cond_formats.append(CondFormat(f"{L(a0)}{b_first}:{L(a0)}{b_last}", "formula",
+                                      f"=${key}{b_first}=MAX(${key}${b_first}:${key}${b_last})",
+                                      bg=GOOD, bold=True))
+    pg = f"{L(proj0)}{b_first}:{L(proj0 + len(CATS) - 1)}{b_last}"
+    my.cond_formats.append(CondFormat(pg, "formula", f"={L(a0 + 1)}{b_first}=0", fg=GRAY, bg=GRAY_BG))
+    my.cond_formats.append(CondFormat(pg, "scale"))
+    my.fmt(pg, number="0.0")
+    my.fmt(f"{L(proj0 + len(CATS) + 2)}{b_first}:{L(proj0 + len(CATS) + 2)}{b_last}", number="0.0")
+    my.hidden_cols.append(proj0 + len(CATS) + 3)
+    for c in range(a0 + 1, a0 + 1 + len(CATS)):
+        my.widths[c] = 38
+    for c in range(proj0, proj0 + len(CATS)):
+        my.widths[c] = 52
+    my.widths[a0] = 120
+    my.widths[a0 + len(CATS) + 1] = 16
+
+    my.widths.update({0: 190, 1: 60, 2: 90, 3: 60})
     my.frozen_rows = 3
 
     # ------------------------------------------------------------------ Cheatsheet

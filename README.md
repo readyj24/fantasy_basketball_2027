@@ -72,9 +72,26 @@ Name fixes: add `data/name_overrides.csv` with columns `source_name,projection_n
   best available Value. The `max(0, …)` keeps a low-value player who'll still be there
   from being scored above his own value.
 
+## Choosing a punt (My Team → Punt Advisor)
+
+For six builds (balanced, punt FT%, FG%, AST+A/T, BLK, 3PTM) the advisor projects your
+end-of-draft total in each category: your current z's, plus for each remaining pick the
+~5 available players at that depth when sorted by the build's value, minus the average
+team's full roster. It counts categories won among the ones the build keeps (5 of 9
+wins the week) and ranks builds by wins, then margin. "Best fit now" is the leader.
+
+- Before your 2nd–3rd pick it is mostly noise; let rounds 1–2 be best-available.
+- Commit around round 3–4: tick the matching **Punt** boxes on Config so the Board
+  re-sorts for that build. Untick to compare.
+- Sanity check from test drafts: Giannis/Zion/Gobert → punt FT%; Trae/Harden/Garland →
+  punt FG%; Wemby/Kessler/Edey → punt AST + A/T.
+- At the turns (slot 1 or the last slot) you pick twice in a row: pair two players
+  that fit the same build.
+
 ## Draft-day checklist
 
 1. Config: set `NumTeams` and `MySlot` as soon as Yahoo shows the order.
 2. Log each pick as it happens (Log tab, column D — start typing the name).
 3. Board: take the top Score unless My Team's position check says otherwise.
+   After round 2–3, check the Punt Advisor and tick Punt boxes for the leading build.
 4. Keep `out/cheatsheet.pdf` open as a backup.
