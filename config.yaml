@@ -1,0 +1,54 @@
+# Juice League draft board configuration.
+# Everything here that also exists on the Sheet's Config tab is only the
+# *initial* value written by the build; during the draft, edit the Sheet.
+
+league:
+  name: Juice League
+  num_teams: 14            # 12, 13 or 14 -- switchable live on the Config tab
+  team_count_options: [12, 13, 14]
+  rounds: 14               # G,G,G,F,F,F,C,Util,Util,Util + 4 BN
+  my_slot: 1               # fill in once Yahoo shows the draft order
+  starting_slots: {G: 3, F: 3, C: 1}
+  categories: [FG%, FT%, 3PTM, PTS, REB, AST, STL, BLK, A/T]
+
+valuation:
+  full_season_games: 75          # availability: min(1, games/75) ^ exponent
+  availability_exponent: 0.5
+  iterations: 2                  # rank -> re-pick pool -> recompute
+  replacement_window: 10         # average of the N players just outside the pool.
+                                 # 1 = the single 197th player (original spec), but one
+                                 # player's quirks (e.g. an efficient big) skew a whole category
+  missing_adp: 250
+
+opponents:
+  adp_weight: 0.5                # opp_rank = w * ADP + (1 - w) * Yahoo rank
+  sigma_mult: 0.18
+  sigma_min: 2
+  drift_window: 20               # last N logged picks
+  drift_min_picks: 5             # Drift = 0 until this many picks are logged
+
+matching:
+  report_below: 95               # print every fuzzy match under this similarity
+  min_accept: 80                 # below this a name is treated as unmatched
+  overrides_file: data/name_overrides.csv
+
+paths:
+  projections: data/raw/projections.csv
+  projections_secondary: null    # optional second projection source to average in
+  adp: data/raw/adp_hashtag.csv   # stopgap from the Hashtag page; swap for Yahoo ADP
+  yahoo_rank: data/raw/yahoo_rank.csv
+  players: data/players.csv
+  values: data/values.csv
+  xlsx: out/juice_draft_board.xlsx
+
+board:
+  main_rows: 40
+  sanity_rows: 10
+  can_wait_pavail: 0.7
+  sleeper_gap: 15                # ★ when value rank beats ADP rank by this much
+  max_players: 400               # rows written to the Players tab
+
+gsheets:
+  service_account_json: secrets/service_account.json
+  spreadsheet_id: null           # or set spreadsheet_title and share it with the SA
+  spreadsheet_title: Juice League Draft Board

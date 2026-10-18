@@ -1,0 +1,8 @@
+secrets/
+__pycache__/
+*.pyc
+.pytest_cache/
+out/
+# Projection/ADP data stays local: the repo is public and Hashtag's projections aren't ours to republish.
+data/raw/
+data/*.csv
