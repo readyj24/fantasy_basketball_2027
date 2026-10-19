@@ -88,7 +88,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
     n = len(players)
     last = n + 1                                  # last data row on Players (1-based)
     log_last = max_picks + 1
-    choose_base = counts[0] - 1                   # CHOOSE(NumTeams-11, ...)
+    choose_base = counts[0] - 1                   # CHOOSE(NumTeams-9, ...) for 10-14 teams
     C = Cols(counts)
 
     wb = Workbook()
@@ -117,7 +117,7 @@ def build_workbook(players: pd.DataFrame, stats: pd.DataFrame, cfg: dict,
 
     # ------------------------------------------------------------------ Config
     rows = [
-        ("NumTeams", lg["num_teams"], "12 / 13 / 14 — switches every value live, no rerun"),
+        ("NumTeams", lg["num_teams"], " / ".join(map(str, counts)) + " — switches every value live, no rerun"),
         ("TotalPicks", "=NumTeams*Rounds", "formula"),
         ("MySlot", lg["my_slot"], "your draft slot (Yahoo shows the order before the draft)"),
         ("SigmaMult", opp["sigma_mult"], "spread of opponents' picks around their rank"),
